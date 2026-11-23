@@ -1,0 +1,57 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: FastAPI Backend (uvicorn --reload)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "syrinx_backend.api.app:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8765",
+        "--reload"
+      ],
+      "cwd": "${workspaceFolder}/backend/python",
+      "env": {
+        "SYRINX_DEFAULT_DIR": "C:\\Users\\john\\Documents\\projects\\syrinxone_ref\\cleansongs",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Web: Chrome (Vite localhost:5173)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/apps/web/src",
+      "preLaunchTask": "Web: Vite Dev Server"
+    },
+    {
+      "name": "Electron: Desktop Main Process",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/desktop-electron",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron.cmd",
+      "args": ["."],
+      "env": {
+        "ELECTRON_RUN_AS_NODE": "",
+        "SYRINX_DEFAULT_DIR": "C:\\Users\\john\\Documents\\projects\\syrinxone_ref\\cleansongs"
+      },
+      "preLaunchTask": "Build All Workspaces",
+      "outputCapture": "std"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack: Python Backend + Web (Chrome)",
+      "configurations": [
+        "Python: FastAPI Backend (uvicorn --reload)",
+        "Web: Chrome (Vite localhost:5173)"
+      ],
+      "stopAll": true
+    }
+  ]
+}

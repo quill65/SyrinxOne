@@ -1,0 +1,16 @@
+# Normalize text line endings to LF across Windows, macOS, and Linux
+* text=auto eol=lf
+
+# Windows batch scripts require CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary audio & image assets
+*.wav binary
+*.flac binary
+*.aif binary
+*.aiff binary
+*.ogg binary
+*.mp3 binary
+*.png binary
+*.ico binary

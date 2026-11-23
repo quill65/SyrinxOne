@@ -1,0 +1,49 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build All Workspaces",
+      "type": "shell",
+      "command": "npm.cmd run build",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "Web: Vite Dev Server",
+      "type": "shell",
+      "command": "npm.cmd run dev:web",
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^$",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "VITE",
+          "endsPattern": "Local:"
+        }
+      }
+    },
+    {
+      "label": "Test: Python Backend (pytest)",
+      "type": "shell",
+      "command": ".\\.venv\\Scripts\\pytest.exe -v",
+      "options": {
+        "cwd": "${workspaceFolder}/backend/python"
+      },
+      "group": "test"
+    },
+    {
+      "label": "Test: Frontend (Vitest)",
+      "type": "shell",
+      "command": "npm.cmd run test:js",
+      "group": "test"
+    }
+  ]
+}
