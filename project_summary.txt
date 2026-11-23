@@ -1,0 +1,5 @@
+Years ago I developed a VC++ app called Syrinx for bioacoustic analysis. I want to develop a multi-platform version: desktop (python), mobile (react?), web (react). The new project will be called SyrixOne and I would like as much of the code to be shared as possible.
+
+The original VC++ code is located here: C:\Users\john\Documents\projects\syrinxone_ref\syrinx_081207
+
+See C:\Users\john\Documents\projects\syrinxone_ref\readme.txt for a description of folder centents in the syrinxone_ref folder.

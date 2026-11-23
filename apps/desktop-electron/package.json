@@ -1,0 +1,19 @@
+{
+  "name": "@syrinxone/desktop-electron",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsc -p tsconfig.json && node ./scripts/launch.cjs"
+  },
+  "dependencies": {
+    "@syrinxone/shared": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "electron": "^33.2.1",
+    "typescript": "^5.8.2"
+  }
+}
