@@ -1,0 +1,14 @@
+.git/
+syrinx_original_cpp/
+node_modules/
+**/node_modules/
+backend/python/.venv/
+backend/python/.pytest_cache/
+backend/python/.ruff_cache/
+**/__pycache__/
+**/dist/
+dist-ai-studio/
+out/
+release/
+*.log
+SyrinxOne.code-workspace

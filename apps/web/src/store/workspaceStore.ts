@@ -31,29 +31,43 @@ const ANNOTATIONS_STORAGE_KEY = 'syrinxone.annotations.v1';
 const ENGINE_STORAGE_KEY = 'syrinxone.engineConfig.v1';
 
 function loadSavedEngineConfig(): { baseUrl: string; token: string } {
-  const envUrl =
-    (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_URL || '';
+  const env = (import.meta as unknown as { env?: Record<string, string> }).env;
+  const envUrl = env?.VITE_API_URL || '';
+  const envToken = env?.VITE_API_TOKEN || '';
   try {
     const params = new URLSearchParams(window.location.search);
     const queryApi = params.get('api');
     const queryToken = params.get('token');
-    if (queryApi) {
-      const cfg = { baseUrl: queryApi.trim(), token: (queryToken ?? '').trim() };
+    if (queryApi || queryToken) {
+      const cfg = {
+        baseUrl: (queryApi ?? envUrl).trim(),
+        token: (queryToken ?? envToken).trim(),
+      };
       localStorage.setItem(ENGINE_STORAGE_KEY, JSON.stringify(cfg));
+      // Strip sensitive token query parameter from the visible URL bar after persisting
+      if (queryToken && window.history?.replaceState) {
+        params.delete('token');
+        const nextSearch = params.toString();
+        const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
+        window.history.replaceState({}, '', nextUrl);
+      }
       return cfg;
     }
     const raw = localStorage.getItem(ENGINE_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as { baseUrl?: string; token?: string };
       return {
-        baseUrl: typeof parsed.baseUrl === 'string' ? parsed.baseUrl : envUrl,
-        token: typeof parsed.token === 'string' ? parsed.token : '',
+        baseUrl:
+          typeof parsed.baseUrl === 'string' && parsed.baseUrl.length > 0
+            ? parsed.baseUrl
+            : envUrl,
+        token: typeof parsed.token === 'string' ? parsed.token : envToken,
       };
     }
   } catch {
     // ignore storage/window errors (e.g., SSR/tests)
   }
-  return { baseUrl: envUrl, token: '' };
+  return { baseUrl: envUrl, token: envToken };
 }
 
 function isNarrowMobileViewport(): boolean {

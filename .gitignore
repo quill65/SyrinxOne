@@ -17,6 +17,7 @@ build/
 # Node / Electron / Web
 node_modules/
 .vite/
+dist-ai-studio/
 out/
 release/
 *.log

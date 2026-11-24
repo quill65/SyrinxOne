@@ -1,44 +1,69 @@
-# Deploying SyrinxOne Backend to Cloud Run & Vibe-Coding in Google AI Studio
+# Deploying SyrinxOne to Cloud Run & Vibe-Coding in Google AI Studio
 
-This setup lets you run the Python DSP + Cloud Archive Engine (`backend/python`) on **Google Cloud Run** (scales to zero when idle) while vibe-coding and testing the Web UI (`apps/web`) from your phone or desktop in **Google AI Studio Build** or any mobile browser.
+This setup runs both the **Python DSP + Acoustic Archive Engine** (`syrinx-engine`) and the **React + WebGL2 Web UI** (`syrinx-web`) on **Google Cloud Run** (scaling to zero when idle), while giving you a one-command standalone export (`npm run export:ai-studio`) for vibe-coding in **Google AI Studio Build** on your phone or browser.
 
-## 1. Deploy the Python Engine to Google Cloud Run
+## Live Services (`syrinxone-backend`, `us-west1`)
 
-From `c:\Users\john\Documents\projects\SyrinxOne\backend\python` (with `gcloud` authenticated to your GCP project):
+- **Web UI**: `https://syrinx-web-466330924576.us-west1.run.app`
+- **Python DSP & Archive Engine**: `https://syrinx-engine-466330924576.us-west1.run.app`
+- **Engine Health Check**: `https://syrinx-engine-466330924576.us-west1.run.app/api/health`
+
+## 1. Redeploy the Python Backend (`syrinx-engine`)
+
+From `backend/python`:
 
 ```powershell
 gcloud run deploy syrinx-engine `
   --source . `
   --region us-west1 `
+  --project syrinxone-backend `
   --allow-unauthenticated `
   --memory 2Gi `
   --cpu 2 `
   --timeout 180 `
-  --set-env-vars "SYRINX_DISABLE_LOCAL_FS=1,GEMINI_API_KEY=YOUR_GEMINI_KEY"
+  --set-env-vars "SYRINX_DISABLE_LOCAL_FS=1"
 ```
 
-*(Optional security: add `,SYRINX_API_TOKEN=your-secret-token` to `--set-env-vars` so only requests with your Bearer token can call the engine.)*
+*(Optional security / server-side AI: run `gcloud run services update syrinx-engine --region us-west1 --project syrinxone-backend --update-env-vars "GEMINI_API_KEY=AIza...,SYRINX_API_TOKEN=your_secret"` — always pair `GEMINI_API_KEY` with `SYRINX_API_TOKEN` on a public URL.)*
 
-Cloud Run prints a service URL such as:
-`https://syrinx-engine-xxxxxxxxxx-uw.a.run.app`
+## 2. Redeploy the Web UI (`syrinx-web`)
 
-Verify it is live:
-`https://syrinx-engine-xxxxxxxxxx-uw.a.run.app/api/health`
+From the repository root (`c:\Users\john\Documents\projects\SyrinxOne`):
 
-## 2. Connect the Web App (Phone Browser or AI Studio Build)
+```powershell
+gcloud builds submit --config cloudbuild.web.yaml --project syrinxone-backend
+gcloud run deploy syrinx-web `
+  --image us-west1-docker.pkg.dev/syrinxone-backend/cloud-run-source-deploy/syrinx-web:latest `
+  --region us-west1 `
+  --project syrinxone-backend `
+  --allow-unauthenticated `
+  --memory 256Mi `
+  --cpu 1 `
+  --port 8080
+```
 
-You have three ways to point the Web App at your Cloud Run engine:
+`cloudbuild.web.yaml` builds `apps/web/Dockerfile` with `VITE_API_URL=https://syrinx-engine-466330924576.us-west1.run.app` baked in and serves the SPA via `apps/web/nginx.conf`.
 
-1. **In-App Engine Switcher (no rebuild needed)**:
-   - Tap the **S1 SyrinxOne** badge (with the green/red connection dot) in the top-left toolbar.
-   - Paste your Cloud Run URL (and optional Bearer token), then tap **Save & Test Connection**.
-   - Saved in browser `localStorage` automatically.
-2. **One-Tap Phone Bookmark**:
-   - Open your web app with `?api=https://syrinx-engine-xxxxxxxxxx-uw.a.run.app` (and optional `&token=...`)—SyrinxOne automatically saves and connects to it.
-3. **Environment Variable in AI Studio Build / Vite**:
-   - Set `VITE_API_URL=https://syrinx-engine-xxxxxxxxxx-uw.a.run.app` in your web deployment or AI Studio environment settings.
+## 3. Google AI Studio Build Option (Vibe-Coding From Your Phone)
 
-## 3. Mobile Browser Controls (`<= 768px`)
+Because the main `master` branch is an npm workspaces monorepo (`packages/shared` + `apps/web` + `apps/desktop-electron`), use the included standalone exporter to generate a flat, single-package Vite + React project ready for **Google AI Studio Build**:
+
+```powershell
+npm.cmd run export:ai-studio
+```
+
+This creates `dist-ai-studio/` (gitignored on `master`) with:
+- Flat `package.json`, `index.html`, `vite.config.ts`, `tsconfig.json`, and `metadata.json`
+- `packages/shared/src` inlined into `src/shared/` and aliased as `@syrinxone/shared` so edited UI files copy **1:1 back into `apps/web/src/`** with zero import changes
+- `.env` pre-wired to `VITE_API_URL=https://syrinx-engine-466330924576.us-west1.run.app`
+
+### Connecting Google AI Studio Build
+- **Via GitHub (`ai-studio` branch)**: Import `quill65/SyrinxOne` (branch `ai-studio`) into Google AI Studio Build — or upload the `dist-ai-studio/` folder/zip.
+- **Switching Backend / Token at Runtime**:
+  - Tap the **S1 SyrinxOne** badge in the top-left toolbar to change the Cloud Run URL or enter a Bearer token (`localStorage`-persisted).
+  - Or share a one-click link: `https://syrinx-web-466330924576.us-west1.run.app/?api=https://syrinx-engine-466330924576.us-west1.run.app&token=YOUR_SECRET` (the `token` parameter is automatically saved to `localStorage` and stripped from the visible address bar).
+
+## 4. Mobile Browser Controls (`<= 768px`)
 
 - **Single-Pane Tabbed View**: Open recordings appear as tabs along the top instead of floating MDI windows.
 - **Touch Controls HUD** (top-right of spectrogram):
@@ -47,4 +72,4 @@ You have three ways to point the Web App at your Cloud Run engine:
   - **2-Finger Pinch**: Zooms time smoothly around the pinch midpoint.
   - **Double-Tap**: Plays the active selection or visible view.
   - **+ / − / Fit / +Log**: Quick one-handed zoom and annotation buttons.
-- **Slide-Over Panels**: Tapping **AI Explorer**, **Settings/Measurements**, or **Annotations** opens a full-width sheet on phones without squishing the spectrogram.
+- **Slide-Over Panels**: Tapping **AI Explorer**, **Settings/Measurements**, or **Annotations** opens a full-width sheet on phones with a close (`X`) button.
