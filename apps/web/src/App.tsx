@@ -18,6 +18,7 @@ import {
   Save,
   Scissors,
   SlidersHorizontal,
+  Sparkles,
   Square,
   Upload,
 } from 'lucide-react';
@@ -32,6 +33,8 @@ import { HotkeyConfigModal } from './components/annotations/HotkeyConfigModal';
 import { KlipnSaveModal } from './components/dialogs/KlipnSaveModal';
 import { FileBrowserModal } from './components/dialogs/FileBrowserModal';
 import { DetectSoundsModal } from './components/dialogs/DetectSoundsModal';
+import { EngineConnectionModal } from './components/dialogs/EngineConnectionModal';
+import { AiExplorerPanel } from './components/panels/AiExplorerPanel';
 
 declare global {
   interface Window {
@@ -57,7 +60,9 @@ export const App: React.FC = () => {
   const selectedAnnotationId = useWorkspaceStore((s) => s.selectedAnnotationId);
 
   const showSpecPanel = useWorkspaceStore((s) => s.showSpecPanel);
+  const showAiPanel = useWorkspaceStore((s) => s.showAiPanel);
   const showAnnotationDrawer = useWorkspaceStore((s) => s.showAnnotationDrawer);
+  const shiftArchiveWindow = useWorkspaceStore((s) => s.shiftArchiveWindow);
   const setModalState = useWorkspaceStore((s) => s.setModalState);
   const applyLayout = useWorkspaceStore((s) => s.applyLayout);
   const toggleAllTitlebars = useWorkspaceStore((s) => s.toggleAllTitlebars);
@@ -354,6 +359,7 @@ export const App: React.FC = () => {
   ]);
 
   const activeWin = windows.find((w) => w.windowId === activeWindowId);
+  const activeFile = activeWin ? files[activeWin.fileId] : undefined;
   const activeSpecReady = Boolean(
     activeWin && getCachedSpectrogram(specCache, activeWin.fileId, activeWin.specParams),
   );
@@ -361,14 +367,18 @@ export const App: React.FC = () => {
   return (
     <div className="app-shell">
       <header className="top-toolbar">
-        <div className="brand">
+        <button
+          className="brand brand-btn"
+          onClick={() => setModalState('showEngineModal', true)}
+          title="Configure Python Engine URL (Cloud Run / Local)"
+        >
           <span className="brand-mark">S1</span>
           <span className="brand-name">SyrinxOne</span>
           <span
             className={`conn-dot ${backendConnected ? 'ok' : 'down'}`}
-            title={backendConnected ? `Engine v${backendVersion}` : 'Engine offline'}
+            title={backendConnected ? `Engine v${backendVersion}` : 'Engine offline — click to configure URL'}
           />
-        </div>
+        </button>
 
         <div className="toolbar-group">
           <button className="btn-small btn-primary" onClick={() => void handleOpenAudio()}>
@@ -378,7 +388,7 @@ export const App: React.FC = () => {
             Sources
           </button>
           <button
-            className="btn-small"
+            className="btn-small desktop-only"
             disabled={!activeWin}
             onClick={() => activeWin && void stepFileInFolder(activeWin.windowId, -1)}
             title="Previous audio file in folder (Alt+←)"
@@ -386,7 +396,7 @@ export const App: React.FC = () => {
             <ChevronLeft size={13} />
           </button>
           <button
-            className="btn-small"
+            className="btn-small desktop-only"
             disabled={!activeWin}
             onClick={() => activeWin && void stepFileInFolder(activeWin.windowId, 1)}
             title="Next audio file in folder (Alt+→)"
@@ -395,7 +405,7 @@ export const App: React.FC = () => {
           </button>
         </div>
 
-        <div className="toolbar-group" title="Workspace Display Files (.json)">
+        <div className="toolbar-group desktop-only" title="Workspace Display Files (.json)">
           <button
             className="btn-small"
             disabled={windows.length === 0}
@@ -420,7 +430,7 @@ export const App: React.FC = () => {
           />
         </div>
 
-        <div className="toolbar-group" title="Classic Syrinx MDI Window Layouts">
+        <div className="toolbar-group desktop-only" title="Classic Syrinx MDI Window Layouts">
           <button className="btn-small" onClick={() => applyLayout('tile_grid')} title="Tile Grid (R x C)">
             <Grid size={13} /> Grid
           </button>
@@ -517,11 +527,42 @@ export const App: React.FC = () => {
 
         <div className="toolbar-spacer" />
 
+        {activeWin && activeFile?.isPartialWindow && (
+          <div className="toolbar-group" title="Navigate time slices of a large cloud archive recording">
+            <span className="window-badge mono">
+              {Math.round(activeFile.windowStartSec ?? 0)}–
+              {Math.round((activeFile.windowStartSec ?? 0) + activeFile.durationSec)}s /{' '}
+              {Math.round(activeFile.totalDurationSec ?? activeFile.durationSec)}s
+            </span>
+            <button
+              className="btn-small"
+              onClick={() => void shiftArchiveWindow(activeWin.windowId, -1)}
+              title="Load previous time window"
+            >
+              <ChevronLeft size={12} /> Win
+            </button>
+            <button
+              className="btn-small"
+              onClick={() => void shiftArchiveWindow(activeWin.windowId, 1)}
+              title="Load next time window"
+            >
+              Win <ChevronRight size={12} />
+            </button>
+          </div>
+        )}
+
         <div className="toolbar-group">
+          <button
+            className={`btn-small ${showAiPanel ? 'btn-active' : ''}`}
+            onClick={() => setModalState('showAiPanel', !showAiPanel)}
+            title="Toggle AI Bioacoustic Explorer Panel"
+          >
+            <Sparkles size={13} /> AI Explorer
+          </button>
           <button
             className={`btn-small ${showSpecPanel ? 'btn-active' : ''}`}
             onClick={() => setModalState('showSpecPanel', !showSpecPanel)}
-            title="Toggle Spectrogram Settings Panel"
+            title="Toggle Spectrogram Settings & Measurements Panel"
           >
             <SlidersHorizontal size={13} /> <PanelRight size={13} />
           </button>
@@ -550,6 +591,7 @@ export const App: React.FC = () => {
           {showAnnotationDrawer && <AnnotationDrawer />}
         </div>
         {showSpecPanel && <SpecSettingsPanel />}
+        {showAiPanel && <AiExplorerPanel />}
       </div>
 
       <footer className="status-bar">
@@ -577,6 +619,7 @@ export const App: React.FC = () => {
       </footer>
 
       <FileBrowserModal />
+      <EngineConnectionModal />
       <HotkeyConfigModal />
       <KlipnSaveModal />
       <DetectSoundsModal />

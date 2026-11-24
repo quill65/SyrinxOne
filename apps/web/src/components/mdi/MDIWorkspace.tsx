@@ -1,14 +1,20 @@
 import React, { useEffect, useRef } from 'react';
+import { X } from 'lucide-react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { MDIChildWindow } from './MDIChildWindow';
+import { SpectrogramView } from '../spectrogram/SpectrogramView';
+
+const MOBILE_TAB_HEIGHT = 36;
 
 export const MDIWorkspace: React.FC = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const windows = useWorkspaceStore((s) => s.windows);
   const files = useWorkspaceStore((s) => s.files);
   const activeWindowId = useWorkspaceStore((s) => s.activeWindowId);
+  const canvasBounds = useWorkspaceStore((s) => s.canvasBounds);
   const setCanvasBounds = useWorkspaceStore((s) => s.setCanvasBounds);
   const focusWindow = useWorkspaceStore((s) => s.focusWindow);
+  const closeWindow = useWorkspaceStore((s) => s.closeWindow);
   const openUploadedFile = useWorkspaceStore((s) => s.openUploadedFile);
   const importAnnotationsFromText = useWorkspaceStore((s) => s.importAnnotationsFromText);
   const setModalState = useWorkspaceStore((s) => s.setModalState);
@@ -47,6 +53,10 @@ export const MDIWorkspace: React.FC = () => {
   };
 
   const minimizedWindows = windows.filter((w) => w.minimized);
+  const isMobileSinglePane = canvasBounds.width > 0 && canvasBounds.width <= 768;
+  const activeMobileWin =
+    windows.find((w) => w.windowId === activeWindowId) ?? windows[windows.length - 1];
+  const activeMobileFile = activeMobileWin ? files[activeMobileWin.fileId] : undefined;
 
   return (
     <div
@@ -57,47 +67,82 @@ export const MDIWorkspace: React.FC = () => {
     >
       {windows.length === 0 && (
         <div className="mdi-empty-state">
-          <h2>SyrinxOne MDI Workspace</h2>
+          <h2>SyrinxOne Acoustic Workstation</h2>
           <p>
-            Open audio files (WAV, FLAC, AIFF, OGG, MP3) via <strong>Browse / Open</strong> or drag
-            &amp; drop files directly onto this canvas.
+            Browse public ocean archives (<strong>MBARI AWS</strong>, <strong>NOAA NCEI</strong>),
+            connect <strong>Google Drive</strong>, paste a URL, or upload local audio files.
           </p>
           <p className="mdi-empty-hint">
-            Controls: Drag to draw selection box · Press configured hotkeys to stamp annotations ·
-            Wheel to zoom time · Alt+Wheel to zoom frequency · Shift+Drag to pan · Double-click to
-            reset view
+            Desktop: Drag to select · Wheel to zoom · Shift+Drag to pan · Mobile: Pinch to zoom ·
+            Toggle Select/Pan touch controls
           </p>
           <button className="btn-primary" onClick={() => setModalState('showFileBrowser', true)}>
-            Browse Local / Cloud Sources
+            Browse Local / Cloud Archives
           </button>
         </div>
       )}
 
-      {windows.map((win) => {
-        const file = files[win.fileId];
-        if (!file) return null;
-        return (
-          <MDIChildWindow
-            key={win.windowId}
-            win={win}
-            file={file}
-            isActive={win.windowId === activeWindowId}
-          />
-        );
-      })}
-
-      {minimizedWindows.length > 0 && (
-        <div className="mdi-minimized-tray">
-          {minimizedWindows.map((w) => (
-            <button
-              key={w.windowId}
-              className="mdi-minimized-pill"
-              onClick={() => focusWindow(w.windowId)}
-            >
-              {w.title}
-            </button>
-          ))}
+      {isMobileSinglePane && windows.length > 0 && activeMobileWin && activeMobileFile ? (
+        <div className="mobile-single-pane">
+          <div className="mobile-tab-strip">
+            {windows.map((w) => (
+              <div
+                key={w.windowId}
+                className={`mobile-tab ${w.windowId === activeMobileWin.windowId ? 'active' : ''}`}
+                onClick={() => focusWindow(w.windowId)}
+              >
+                <span className="mobile-tab-title">{w.title}</span>
+                <button
+                  className="mobile-tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeWindow(w.windowId);
+                  }}
+                  title="Close tab"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="mobile-spec-stage">
+            <SpectrogramView
+              win={activeMobileWin}
+              file={activeMobileFile}
+              width={Math.max(240, canvasBounds.width)}
+              height={Math.max(200, canvasBounds.height - MOBILE_TAB_HEIGHT)}
+            />
+          </div>
         </div>
+      ) : (
+        <>
+          {windows.map((win) => {
+            const file = files[win.fileId];
+            if (!file) return null;
+            return (
+              <MDIChildWindow
+                key={win.windowId}
+                win={win}
+                file={file}
+                isActive={win.windowId === activeWindowId}
+              />
+            );
+          })}
+
+          {minimizedWindows.length > 0 && (
+            <div className="mdi-minimized-tray">
+              {minimizedWindows.map((w) => (
+                <button
+                  key={w.windowId}
+                  className="mdi-minimized-pill"
+                  onClick={() => focusWindow(w.windowId)}
+                >
+                  {w.title}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

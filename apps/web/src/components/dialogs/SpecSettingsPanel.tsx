@@ -1,6 +1,8 @@
 import React from 'react';
+import { X } from 'lucide-react';
 import type { ColormapName, DspMode, RenderMode, TimeScaleMode, WindowType } from '@syrinxone/shared';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { MeasurementInspector } from '../panels/MeasurementInspector';
 
 export const SpecSettingsPanel: React.FC = () => {
   const windows = useWorkspaceStore((s) => s.windows);
@@ -9,13 +11,23 @@ export const SpecSettingsPanel: React.FC = () => {
   const updateWindowSpecParams = useWorkspaceStore((s) => s.updateWindowSpecParams);
   const applySettingsToAllWindows = useWorkspaceStore((s) => s.applySettingsToAllWindows);
   const makeActiveSettingsDefault = useWorkspaceStore((s) => s.makeActiveSettingsDefault);
+  const setModalState = useWorkspaceStore((s) => s.setModalState);
 
   const activeWin = windows.find((w) => w.windowId === activeWindowId);
   if (!activeWin) {
     return (
       <aside className="side-panel">
-        <div className="panel-header">Spectrogram Settings</div>
-        <div className="panel-empty">Select an MDI window to adjust display &amp; FFT settings.</div>
+        <div className="panel-header ai-panel-header">
+          <span>Spectrogram Settings</span>
+          <button
+            className="mdi-win-btn"
+            onClick={() => setModalState('showSpecPanel', false)}
+            title="Close Settings panel"
+          >
+            <X size={13} />
+          </button>
+        </div>
+        <div className="panel-empty">Select a window to adjust display &amp; FFT settings.</div>
       </aside>
     );
   }
@@ -24,8 +36,19 @@ export const SpecSettingsPanel: React.FC = () => {
 
   return (
     <aside className="side-panel">
-      <div className="panel-header">Spectrogram Settings</div>
+      <div className="panel-header ai-panel-header">
+        <span>Spectrogram Settings</span>
+        <button
+          className="mdi-win-btn"
+          onClick={() => setModalState('showSpecPanel', false)}
+          title="Close Settings panel"
+        >
+          <X size={13} />
+        </button>
+      </div>
       <div className="panel-body">
+        <MeasurementInspector />
+        <hr className="panel-divider" />
         <div className="panel-btn-row">
           <button
             className="btn-small"

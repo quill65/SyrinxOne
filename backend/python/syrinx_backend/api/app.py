@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from syrinx_backend import __version__
+from syrinx_backend.ai.explorer import analyze_recording_with_ai
 from syrinx_backend.annotations.formats import (
     export_annotations,
     import_annotations,
@@ -15,14 +17,18 @@ from syrinx_backend.annotations.formats import (
 from syrinx_backend.api.auth import verify_token_dependency
 from syrinx_backend.audio.loader import AudioSessionCache, expand_clip_template
 from syrinx_backend.dsp.detector import detect_sound_events
+from syrinx_backend.dsp.measurements import measure_acoustic_selection
 from syrinx_backend.dsp.stft_engine import compute_spectrogram, render_spectrogram_png
 from syrinx_backend.models import (
+    AiAnalyzeRequest,
+    AiAnalyzeResponse,
     AnnotationDocument,
     AudioFileInfo,
     BrowseEntry,
     ClipSaveRequest,
     ClipSaveResponse,
     ColormapName,
+    CreateSourceRequest,
     DataSourceInfo,
     DetectSoundsRequest,
     DetectSoundsResponse,
@@ -30,14 +36,17 @@ from syrinx_backend.models import (
     ExportAnnotationsTextRequest,
     ImportAnnotationsSourceRequest,
     ImportAnnotationsTextRequest,
+    MeasureSelectionRequest,
     OpenAudioRequest,
     SaveAnnotationsSourceRequest,
+    SelectionMeasurements,
     WaveformOverview,
     WindowType,
 )
 from syrinx_backend.storage.base import SourceRegistry
 from syrinx_backend.storage.cloud_adapters import (
     GCSAudioDataSource,
+    GoogleDriveAudioDataSource,
     HttpUrlAudioDataSource,
     S3AudioDataSource,
     load_custom_source_plugins,
@@ -45,17 +54,61 @@ from syrinx_backend.storage.cloud_adapters import (
 from syrinx_backend.storage.local_fs import LocalFilesystemSource
 
 
+def _slugify_source_id(text: str, prefix: str) -> str:
+    clean = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:32]
+    return f"{prefix}_{clean}" if clean else prefix
+
+
 def _build_default_registry() -> SourceRegistry:
     registry = SourceRegistry()
 
-    default_root = os.environ.get("SYRINX_DEFAULT_DIR")
-    restrict = os.environ.get("SYRINX_RESTRICT_LOCAL_ROOT", "0") == "1"
+    disable_local = os.environ.get("SYRINX_DISABLE_LOCAL_FS", "0") == "1"
+    if not disable_local:
+        default_root = os.environ.get("SYRINX_DEFAULT_DIR")
+        restrict = os.environ.get("SYRINX_RESTRICT_LOCAL_ROOT", "0") == "1"
+        registry.register(
+            LocalFilesystemSource(
+                source_id="local",
+                display_name="Local Filesystem",
+                root_dir=default_root if default_root else None,
+                restrict_to_root=restrict,
+            )
+        )
+
+    # Built-in public bioacoustic archives (anonymous HTTPS read, zero credentials required)
     registry.register(
-        LocalFilesystemSource(
-            source_id="local",
-            display_name="Local Filesystem",
-            root_dir=default_root if default_root else None,
-            restrict_to_root=restrict,
+        S3AudioDataSource(
+            source_id="mbari_16khz",
+            bucket="pacific-sound-16khz",
+            region="us-west-2",
+            display_name="MBARI Pacific Ocean Sound (16 kHz, AWS)",
+            description="MBARI Monterey Bay MARS cabled hydrophone decimated 16 kHz recordings (AWS Open Data)",
+            anonymous=True,
+            read_only=True,
+            removable=False,
+        )
+    )
+    registry.register(
+        S3AudioDataSource(
+            source_id="mbari_2khz",
+            bucket="pacific-sound-2khz",
+            region="us-west-2",
+            display_name="MBARI Pacific Ocean Sound (2 kHz Whales, AWS)",
+            description="MBARI Monterey Bay 2 kHz low-frequency archive (blue/fin/humpback whales)",
+            anonymous=True,
+            read_only=True,
+            removable=False,
+        )
+    )
+    registry.register(
+        GCSAudioDataSource(
+            source_id="noaa_ncei",
+            bucket="noaa-passive-bioacoustic",
+            display_name="NOAA NCEI Passive Acoustic Archive (GCS)",
+            description="NOAA National Centers for Environmental Information Passive Acoustic Data Archive (SanctSound, SoundCoop)",
+            anonymous=True,
+            read_only=True,
+            removable=False,
         )
     )
 
@@ -66,7 +119,9 @@ def _build_default_registry() -> SourceRegistry:
                 source_id="s3",
                 bucket=s3_bucket,
                 prefix=os.environ.get("SYRINX_S3_PREFIX", ""),
+                region=os.environ.get("SYRINX_S3_REGION"),
                 endpoint_url=os.environ.get("SYRINX_S3_ENDPOINT_URL"),
+                anonymous=os.environ.get("SYRINX_S3_ANONYMOUS", "0") == "1",
             )
         )
 
@@ -77,13 +132,13 @@ def _build_default_registry() -> SourceRegistry:
                 source_id="gcs",
                 bucket=gcs_bucket,
                 prefix=os.environ.get("SYRINX_GCS_PREFIX", ""),
+                anonymous=os.environ.get("SYRINX_GCS_ANONYMOUS", "0") == "1",
             )
         )
 
     http_catalog = os.environ.get("SYRINX_HTTP_URLS", "")
-    if http_catalog.strip():
-        urls = [u.strip() for u in http_catalog.split(",") if u.strip()]
-        registry.register(HttpUrlAudioDataSource(catalog_urls=urls))
+    urls = [u.strip() for u in http_catalog.split(",") if u.strip()] if http_catalog.strip() else []
+    registry.register(HttpUrlAudioDataSource(source_id="http", catalog_urls=urls))
 
     plugin_specs = os.environ.get("SYRINX_SOURCE_PLUGINS", "")
     if plugin_specs.strip():
@@ -101,7 +156,7 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=[
@@ -133,26 +188,114 @@ def create_app(
     async def list_sources() -> list[DataSourceInfo]:
         return source_registry.list_info()
 
+    @app.post("/api/sources", response_model=DataSourceInfo, dependencies=[auth_dep])
+    async def create_source(req: CreateSourceRequest) -> DataSourceInfo:
+        if req.kind == "s3":
+            if not req.bucket or not req.bucket.strip():
+                raise HTTPException(status_code=400, detail="S3 source requires a bucket name")
+            bucket = req.bucket.strip().removeprefix("s3://").split("/", 1)[0]
+            sid = req.source_id or _slugify_source_id(bucket, "s3")
+            source = S3AudioDataSource(
+                source_id=sid,
+                bucket=bucket,
+                prefix=req.prefix,
+                display_name=req.display_name or f"S3: {bucket}",
+                region=req.region,
+                endpoint_url=req.endpoint_url,
+                read_only=req.read_only or req.anonymous,
+                anonymous=req.anonymous,
+                description=f"s3://{bucket}/{req.prefix}".rstrip("/"),
+                removable=True,
+            )
+        elif req.kind == "gcs":
+            if not req.bucket or not req.bucket.strip():
+                raise HTTPException(status_code=400, detail="GCS source requires a bucket name")
+            bucket = req.bucket.strip().removeprefix("gs://").split("/", 1)[0]
+            sid = req.source_id or _slugify_source_id(bucket, "gcs")
+            source = GCSAudioDataSource(
+                source_id=sid,
+                bucket=bucket,
+                prefix=req.prefix,
+                display_name=req.display_name or f"GCS: {bucket}",
+                read_only=req.read_only or req.anonymous,
+                anonymous=req.anonymous,
+                description=f"gs://{bucket}/{req.prefix}".rstrip("/"),
+                removable=True,
+            )
+        elif req.kind == "gdrive":
+            if not req.folder_or_url or not req.folder_or_url.strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Google Drive source requires a shared folder/file URL or Drive ID",
+                )
+            sid = req.source_id or _slugify_source_id(
+                req.display_name or req.folder_or_url[:18], "gdrive"
+            )
+            source = GoogleDriveAudioDataSource(
+                source_id=sid,
+                folder_or_url=req.folder_or_url,
+                display_name=req.display_name,
+                api_key=req.api_key,
+                oauth_token=req.oauth_token,
+                removable=True,
+            )
+        elif req.kind == "http":
+            raw_urls = req.folder_or_url or ""
+            urls = [u.strip() for u in re.split(r"[\n,]+", raw_urls) if u.strip()]
+            sid = req.source_id or _slugify_source_id(req.display_name or "urls", "http")
+            source = HttpUrlAudioDataSource(
+                source_id=sid,
+                display_name=req.display_name or "HTTP Audio Catalog",
+                catalog_urls=urls,
+                removable=True,
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported source kind: {req.kind}")
+
+        source_registry.register(source)
+        return source.info()
+
+    @app.delete("/api/sources/{source_id}", dependencies=[auth_dep])
+    async def delete_source(source_id: str) -> dict[str, str]:
+        try:
+            source_registry.unregister(source_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        return {"removed": source_id}
+
     @app.get(
         "/api/sources/{source_id}/browse",
         response_model=list[BrowseEntry],
         dependencies=[auth_dep],
     )
-    async def browse_source(source_id: str, prefix: str = "") -> list[BrowseEntry]:
+    async def browse_source(
+        source_id: str,
+        prefix: str = "",
+        limit: int = Query(default=250, ge=1, le=1000),
+    ) -> list[BrowseEntry]:
         try:
             source = source_registry.get(source_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         try:
-            return await source.list_items(prefix)
+            return await source.list_items(prefix, limit=limit)
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Failed to browse source: {exc}") from exc
 
     @app.post("/api/audio/open", response_model=AudioFileInfo, dependencies=[auth_dep])
     async def open_audio(req: OpenAudioRequest) -> AudioFileInfo:
         try:
             source = source_registry.get(req.source_id)
-            loaded = await audio_cache.open_from_source(source, req.uri)
+            loaded = await audio_cache.open_from_source(
+                source,
+                req.uri,
+                start_sec=req.start_sec,
+                max_duration_sec=req.max_duration_sec,
+            )
             return loaded.info
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -515,6 +658,46 @@ def create_app(
         )
         saved_uri = await source.write_bytes(req.uri, content.encode("utf-8"))
         return {"savedUri": saved_uri, "count": len(req.annotations)}
+
+    @app.post(
+        "/api/audio/{file_id}/measure",
+        response_model=SelectionMeasurements,
+        dependencies=[auth_dep],
+    )
+    async def measure_selection(
+        file_id: str, req: MeasureSelectionRequest
+    ) -> SelectionMeasurements:
+        try:
+            loaded = audio_cache.get(file_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if req.channel < 0 or req.channel >= loaded.info.num_channels:
+            raise HTTPException(status_code=400, detail="Channel index out of range")
+        return measure_acoustic_selection(
+            loaded.samples[req.channel],
+            sample_rate=loaded.info.sample_rate,
+            start_sec=req.start_sec,
+            end_sec=req.end_sec,
+            low_freq_hz=req.low_freq_hz,
+            high_freq_hz=req.high_freq_hz,
+            fft_size=req.fft_size,
+            hop_size=req.hop_size,
+        )
+
+    @app.post(
+        "/api/ai/analyze",
+        response_model=AiAnalyzeResponse,
+        dependencies=[auth_dep],
+    )
+    async def ai_analyze(req: AiAnalyzeRequest) -> AiAnalyzeResponse:
+        try:
+            loaded = audio_cache.get(req.file_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        try:
+            return await analyze_recording_with_ai(loaded, req)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"AI analysis failed: {exc}") from exc
 
     return app
 

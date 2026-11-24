@@ -116,8 +116,17 @@ export const SpectrogramView: React.FC<Props> = ({ win, file, width, height }) =
   const [playback, setPlayback] = useState<PlaybackState>(() => audioPlayer.getState());
   const [cursorStyle, setCursorStyle] = useState<string>('crosshair');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [touchMode, setTouchMode] = useState<'select' | 'pan'>('select');
 
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
+  const lastTapRef = useRef<number>(0);
+  const pinchRef = useRef<{
+    distX: number;
+    distY: number;
+    midX: number;
+    midY: number;
+    origRange: MDIWindowState['viewRange'];
+  } | null>(null);
   const dragModeRef = useRef<
     | { kind: 'select'; startT: number; startF: number }
     | { kind: 'pan'; startX: number; startY: number; origRange: MDIWindowState['viewRange'] }
@@ -695,6 +704,149 @@ export const SpectrogramView: React.FC<Props> = ({ win, file, width, height }) =
   };
 
   const maxScrollStart = Math.max(0, file.durationSec - spanT);
+  const nyquist = file.sampleRate / 2;
+
+  const clientToPlot = (clientX: number, clientY: number) => {
+    const rect = overlayRef.current?.getBoundingClientRect();
+    const x = rect ? clientX - rect.left : 0;
+    const y = rect ? clientY - rect.top : 0;
+    const t = Math.max(0, Math.min(file.durationSec, startSec + ((x - leftPad) / plotW) * spanT));
+    const f = Math.max(
+      0,
+      Math.min(nyquist, minFreqHz + (1 - (y - waveH) / plotH) * spanF),
+    );
+    return { x, y, t, f };
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const [t0, t1] = [e.touches[0], e.touches[1]];
+      dragModeRef.current = null;
+      pinchRef.current = {
+        distX: Math.max(12, Math.abs(t1.clientX - t0.clientX)),
+        distY: Math.max(12, Math.abs(t1.clientY - t0.clientY)),
+        midX: 0.5 * (t0.clientX + t1.clientX),
+        midY: 0.5 * (t0.clientY + t1.clientY),
+        origRange: { ...win.viewRange },
+      };
+      return;
+    }
+    if (e.touches.length !== 1) return;
+
+    const now = Date.now();
+    if (now - lastTapRef.current < 280) {
+      lastTapRef.current = 0;
+      if (win.selection) {
+        void audioPlayer.play(
+          engine,
+          file.fileId,
+          Math.min(win.selection.startSec, win.selection.endSec),
+          Math.max(win.selection.startSec, win.selection.endSec),
+        );
+      } else {
+        void audioPlayer.play(engine, file.fileId, startSec, endSec);
+      }
+      return;
+    }
+    lastTapRef.current = now;
+
+    const touch = e.touches[0];
+    const { x, y, t, f } = clientToPlot(touch.clientX, touch.clientY);
+    if (x < leftPad || y < waveH || y > waveH + plotH) return;
+
+    if (touchMode === 'pan') {
+      dragModeRef.current = {
+        kind: 'pan',
+        startX: touch.clientX,
+        startY: touch.clientY,
+        origRange: { ...win.viewRange },
+      };
+    } else {
+      dragModeRef.current = { kind: 'select', startT: t, startF: f };
+      updateWindowSelection(win.windowId, {
+        startSec: t,
+        endSec: t,
+        lowFreqHz: f,
+        highFreqHz: f,
+        channel: win.specParams.channel + 1,
+      });
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length === 2 && pinchRef.current) {
+      e.preventDefault();
+      const [t0, t1] = [e.touches[0], e.touches[1]];
+      const curDistX = Math.max(12, Math.abs(t1.clientX - t0.clientX));
+      const curMidX = 0.5 * (t0.clientX + t1.clientX);
+      const { distX, midX, origRange } = pinchRef.current;
+
+      const origSpanT = Math.max(0.02, origRange.endSec - origRange.startSec);
+      const zoomFactor = Math.max(0.25, Math.min(4.0, distX / curDistX));
+      const newSpanT = Math.max(0.02, Math.min(file.durationSec, origSpanT * zoomFactor));
+      const rect = overlayRef.current?.getBoundingClientRect();
+      const anchorFrac = rect
+        ? Math.max(0, Math.min(1, (midX - rect.left - leftPad) / plotW))
+        : 0.5;
+      const anchorT = origRange.startSec + anchorFrac * origSpanT;
+      const panDt = ((midX - curMidX) / plotW) * newSpanT;
+
+      let ns = anchorT - anchorFrac * newSpanT + panDt;
+      ns = Math.max(0, Math.min(Math.max(0, file.durationSec - newSpanT), ns));
+      updateWindowViewRange(win.windowId, {
+        ...origRange,
+        startSec: ns,
+        endSec: Math.min(file.durationSec, ns + newSpanT),
+      });
+      return;
+    }
+
+    if (e.touches.length !== 1 || !dragModeRef.current) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const mode = dragModeRef.current;
+    if (mode.kind === 'pan') {
+      const orig = mode.origRange;
+      const oSpanT = orig.endSec - orig.startSec;
+      const oSpanF = orig.maxFreqHz - orig.minFreqHz;
+      const dt = -((touch.clientX - mode.startX) / plotW) * oSpanT;
+      const df = ((touch.clientY - mode.startY) / plotH) * oSpanF;
+      const ns = Math.max(0, Math.min(Math.max(0, file.durationSec - oSpanT), orig.startSec + dt));
+      const nf = Math.max(0, Math.min(Math.max(0, nyquist - oSpanF), orig.minFreqHz + df));
+      updateWindowViewRange(win.windowId, {
+        startSec: ns,
+        endSec: Math.min(file.durationSec, ns + oSpanT),
+        minFreqHz: nf,
+        maxFreqHz: Math.min(nyquist, nf + oSpanF),
+      });
+    } else if (mode.kind === 'select') {
+      const { t, f } = clientToPlot(touch.clientX, touch.clientY);
+      updateWindowSelection(win.windowId, {
+        startSec: Math.min(mode.startT, t),
+        endSec: Math.max(mode.startT, t),
+        lowFreqHz: Math.min(mode.startF, f),
+        highFreqHz: Math.max(mode.startF, f),
+        channel: win.specParams.channel + 1,
+      });
+    }
+  };
+
+  const handleTouchEnd = () => {
+    dragModeRef.current = null;
+    pinchRef.current = null;
+  };
+
+  const zoomTimeBy = (factor: number) => {
+    const mid = 0.5 * (startSec + endSec);
+    const nextSpan = Math.max(0.02, Math.min(file.durationSec, spanT * factor));
+    const ns = Math.max(0, Math.min(Math.max(0, file.durationSec - nextSpan), mid - nextSpan / 2));
+    updateWindowViewRange(win.windowId, {
+      ...win.viewRange,
+      startSec: ns,
+      endSec: Math.min(file.durationSec, ns + nextSpan),
+    });
+  };
 
   return (
     <div
@@ -738,6 +890,7 @@ export const SpectrogramView: React.FC<Props> = ({ win, file, width, height }) =
           width: `${width}px`,
           height: `${height - scrollH}px`,
           cursor: cursorStyle,
+          touchAction: 'none',
         }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -745,7 +898,43 @@ export const SpectrogramView: React.FC<Props> = ({ win, file, width, height }) =
         onWheel={handleWheel}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       />
+
+      <div className="mobile-touch-hud">
+        <button
+          className={`btn-small ${touchMode === 'select' ? 'btn-active' : ''}`}
+          onClick={() => setTouchMode('select')}
+        >
+          Select
+        </button>
+        <button
+          className={`btn-small ${touchMode === 'pan' ? 'btn-active' : ''}`}
+          onClick={() => setTouchMode('pan')}
+        >
+          Pan
+        </button>
+        <button className="btn-small" onClick={() => zoomTimeBy(0.6)} title="Zoom in">
+          +
+        </button>
+        <button className="btn-small" onClick={() => zoomTimeBy(1.6)} title="Zoom out">
+          −
+        </button>
+        <button className="btn-small" onClick={() => resetWindowZoom(win.windowId)} title="Reset zoom">
+          Fit
+        </button>
+        {win.selection && (
+          <button
+            className="btn-small btn-primary"
+            onClick={() => logActiveSelection('')}
+            title="Log current selection"
+          >
+            +Log
+          </button>
+        )}
+      </div>
 
       {needsScrollbar && (
         <div

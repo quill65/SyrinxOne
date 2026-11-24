@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Radar, X } from 'lucide-react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 
 export const DetectSoundsModal: React.FC = () => {
   const show = useWorkspaceStore((s) => s.showDetectModal);
+  const suggestedDetectParams = useWorkspaceStore((s) => s.suggestedDetectParams);
+  const clearSuggestedDetectParams = useWorkspaceStore((s) => s.clearSuggestedDetectParams);
   const windows = useWorkspaceStore((s) => s.windows);
   const activeWindowId = useWorkspaceStore((s) => s.activeWindowId);
   const files = useWorkspaceStore((s) => s.files);
@@ -30,6 +32,19 @@ export const DetectSoundsModal: React.FC = () => {
   const [saveClips, setSaveClips] = useState(false);
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!show || !suggestedDetectParams) return;
+    setMinFreqHz(Math.round(suggestedDetectParams.minFreqHz));
+    setMaxFreqHz(Math.round(suggestedDetectParams.maxFreqHz));
+    setTriggerThresholdDb(suggestedDetectParams.triggerThresholdDb);
+    setMinSoundDurSec(suggestedDetectParams.minSoundDurSec);
+    setMaxSilenceGapSec(suggestedDetectParams.maxSilenceGapSec);
+    if (suggestedDetectParams.comment) {
+      setComment(suggestedDetectParams.comment);
+    }
+    clearSuggestedDetectParams();
+  }, [show, suggestedDetectParams, clearSuggestedDetectParams]);
 
   if (!show) return null;
 

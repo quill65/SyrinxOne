@@ -16,8 +16,10 @@ import {
   type MDIWindowState,
   type SavedDisplayFile,
   type SelectionBox,
+  type SelectionMeasurements,
   type SpectrogramMatrix,
   type SpectrogramParams,
+  type SuggestedDetectParams,
   type TimeFreqRange,
   type WaveformOverview,
 } from '@syrinxone/shared';
@@ -25,6 +27,78 @@ import { applyMdiLayout, type CanvasBounds } from '../utils/mdiLayout';
 
 const HOTKEYS_STORAGE_KEY = 'syrinxone.hotkeys.v1';
 const DEFAULTS_STORAGE_KEY = 'syrinxone.windowDefaults.v1';
+const ANNOTATIONS_STORAGE_KEY = 'syrinxone.annotations.v1';
+const ENGINE_STORAGE_KEY = 'syrinxone.engineConfig.v1';
+
+function loadSavedEngineConfig(): { baseUrl: string; token: string } {
+  const envUrl =
+    (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_URL || '';
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const queryApi = params.get('api');
+    const queryToken = params.get('token');
+    if (queryApi) {
+      const cfg = { baseUrl: queryApi.trim(), token: (queryToken ?? '').trim() };
+      localStorage.setItem(ENGINE_STORAGE_KEY, JSON.stringify(cfg));
+      return cfg;
+    }
+    const raw = localStorage.getItem(ENGINE_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { baseUrl?: string; token?: string };
+      return {
+        baseUrl: typeof parsed.baseUrl === 'string' ? parsed.baseUrl : envUrl,
+        token: typeof parsed.token === 'string' ? parsed.token : '',
+      };
+    }
+  } catch {
+    // ignore storage/window errors (e.g., SSR/tests)
+  }
+  return { baseUrl: envUrl, token: '' };
+}
+
+function isNarrowMobileViewport(): boolean {
+  try {
+    return typeof window !== 'undefined' && window.innerWidth <= 768;
+  } catch {
+    return false;
+  }
+}
+
+function loadSavedAnnotations(): {
+  annotations: AnnotationRecord[];
+  nonAnnotationLines: string[];
+} {
+  try {
+    const raw = localStorage.getItem(ANNOTATIONS_STORAGE_KEY);
+    if (!raw) return { annotations: [], nonAnnotationLines: [] };
+    const parsed = JSON.parse(raw) as {
+      annotations?: AnnotationRecord[];
+      nonAnnotationLines?: string[];
+    };
+    return {
+      annotations: Array.isArray(parsed.annotations) ? parsed.annotations : [],
+      nonAnnotationLines: Array.isArray(parsed.nonAnnotationLines)
+        ? parsed.nonAnnotationLines
+        : [],
+    };
+  } catch {
+    return { annotations: [], nonAnnotationLines: [] };
+  }
+}
+
+function persistAnnotations(
+  annotations: AnnotationRecord[],
+  nonAnnotationLines: string[],
+): void {
+  try {
+    localStorage.setItem(
+      ANNOTATIONS_STORAGE_KEY,
+      JSON.stringify({ annotations, nonAnnotationLines }),
+    );
+  } catch {
+    // ignore storage quota errors
+  }
+}
 
 function loadSavedHotkeys(): HotkeyBinding[] {
   try {
@@ -87,6 +161,8 @@ function parentPrefix(uri: string): string {
 
 export interface WorkspaceStore {
   engine: HttpAudioEngineClient;
+  backendUrl: string;
+  backendToken: string;
   backendConnected: boolean;
   backendVersion: string;
   statusMessage: string;
@@ -114,10 +190,13 @@ export interface WorkspaceStore {
 
   showAnnotationDrawer: boolean;
   showSpecPanel: boolean;
+  showAiPanel: boolean;
+  showEngineModal: boolean;
   showFileBrowser: boolean;
   showHotkeyModal: boolean;
   showKlipModal: boolean;
   showDetectModal: boolean;
+  suggestedDetectParams: SuggestedDetectParams | null;
 
   setBackendConfig: (baseUrl: string, token?: string) => void;
   checkBackendHealth: () => Promise<void>;
@@ -126,8 +205,22 @@ export interface WorkspaceStore {
   setError: (err: string | null) => void;
   setCursorReadout: (readout: CursorReadout | null) => void;
 
-  openAudioFromSource: (sourceId: string, uri: string) => Promise<void>;
-  loadAudioIntoWindow: (windowId: string, sourceId: string, uri: string) => Promise<void>;
+  openAudioFromSource: (
+    sourceId: string,
+    uri: string,
+    options?: { startSec?: number; maxDurationSec?: number },
+  ) => Promise<void>;
+  openAudioUrl: (
+    url: string,
+    options?: { startSec?: number; maxDurationSec?: number },
+  ) => Promise<void>;
+  loadAudioIntoWindow: (
+    windowId: string,
+    sourceId: string,
+    uri: string,
+    options?: { startSec?: number; maxDurationSec?: number },
+  ) => Promise<void>;
+  shiftArchiveWindow: (windowId: string, deltaWindows: -1 | 1) => Promise<void>;
   stepFileInFolder: (windowId: string, delta: -1 | 1) => Promise<void>;
   openUploadedFile: (file: File) => Promise<void>;
   openAudioInfoInWindow: (info: AudioFileInfo) => Promise<string>;
@@ -166,6 +259,12 @@ export interface WorkspaceStore {
   addDetectedAnnotations: (detections: AnnotationRecord[], replaceForSoundfile?: string) => void;
   stampSelectionWithHotkey: (key: string) => AnnotationRecord | null;
   logActiveSelection: (comment?: string) => AnnotationRecord | null;
+  logSelectionWithMeasurements: (
+    measurements: SelectionMeasurements,
+    comment?: string,
+  ) => AnnotationRecord | null;
+  applySuggestedDetectParams: (params: SuggestedDetectParams) => void;
+  clearSuggestedDetectParams: () => void;
   updateAnnotation: (id: string, patch: Partial<AnnotationRecord>) => void;
   deleteAnnotation: (id: string) => void;
   selectAnnotation: (id: string | null, jumpToView?: boolean) => void;
@@ -191,6 +290,8 @@ export interface WorkspaceStore {
     key:
       | 'showAnnotationDrawer'
       | 'showSpecPanel'
+      | 'showAiPanel'
+      | 'showEngineModal'
       | 'showFileBrowser'
       | 'showHotkeyModal'
       | 'showKlipModal'
@@ -199,16 +300,21 @@ export interface WorkspaceStore {
   ) => void;
 }
 
-const defaultBaseUrl =
-  (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_URL || '';
-
+const initialEngineConfig = loadSavedEngineConfig();
 const initialDefaults = loadSavedDefaults();
+const initialAnnotations = loadSavedAnnotations();
+const startMobile = isNarrowMobileViewport();
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
-  engine: new HttpAudioEngineClient({ baseUrl: defaultBaseUrl }),
+  engine: new HttpAudioEngineClient({
+    baseUrl: initialEngineConfig.baseUrl,
+    token: initialEngineConfig.token || undefined,
+  }),
+  backendUrl: initialEngineConfig.baseUrl,
+  backendToken: initialEngineConfig.token,
   backendConnected: false,
   backendVersion: '',
-  statusMessage: 'Ready — open a sound file to begin',
+  statusMessage: 'Ready — open a local file or browse MBARI / NOAA / Google Drive archives',
   errorMessage: null,
 
   files: {},
@@ -224,22 +330,36 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   defaultSpecParams: initialDefaults.specParams,
   defaultDisplaySettings: initialDefaults.displaySettings,
 
-  annotations: [],
-  nonAnnotationLines: [],
+  annotations: initialAnnotations.annotations,
+  nonAnnotationLines: initialAnnotations.nonAnnotationLines,
   selectedAnnotationId: null,
   redefineAnnotationId: null,
   annotationFilter: { ...DEFAULT_ANNOTATION_FILTER },
   hotkeys: loadSavedHotkeys(),
 
-  showAnnotationDrawer: true,
-  showSpecPanel: true,
+  showAnnotationDrawer: !startMobile,
+  showSpecPanel: !startMobile,
+  showAiPanel: false,
+  showEngineModal: false,
   showFileBrowser: false,
   showHotkeyModal: false,
   showKlipModal: false,
   showDetectModal: false,
+  suggestedDetectParams: null,
 
   setBackendConfig: (baseUrl, token) => {
-    get().engine.setConfig({ baseUrl, token });
+    const cleanUrl = baseUrl.trim().replace(/\/+$/, '');
+    const cleanToken = (token ?? '').trim();
+    get().engine.setConfig({ baseUrl: cleanUrl, token: cleanToken || undefined });
+    try {
+      localStorage.setItem(
+        ENGINE_STORAGE_KEY,
+        JSON.stringify({ baseUrl: cleanUrl, token: cleanToken }),
+      );
+    } catch {
+      // ignore
+    }
+    set({ backendUrl: cleanUrl, backendToken: cleanToken });
   },
 
   checkBackendHealth: async () => {
@@ -263,10 +383,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   setError: (err) => set({ errorMessage: err }),
   setCursorReadout: (cursorReadout) => set({ cursorReadout }),
 
-  openAudioFromSource: async (sourceId, uri) => {
+  openAudioFromSource: async (sourceId, uri, options) => {
     try {
       set({ statusMessage: `Opening ${uri}...`, errorMessage: null });
-      const info = await get().engine.openAudio(sourceId, uri);
+      const info = await get().engine.openAudio(sourceId, uri, options);
       await get().openAudioInfoInWindow(info);
     } catch (err) {
       set({
@@ -275,10 +395,14 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }
   },
 
-  loadAudioIntoWindow: async (windowId, sourceId, uri) => {
+  openAudioUrl: async (url, options) => {
+    await get().openAudioFromSource('http', url, options);
+  },
+
+  loadAudioIntoWindow: async (windowId, sourceId, uri, options) => {
     try {
       set({ statusMessage: `Loading ${uri} into active window...`, errorMessage: null });
-      const info = await get().engine.openAudio(sourceId, uri);
+      const info = await get().engine.openAudio(sourceId, uri, options);
       const nyquist = info.sampleRate / 2;
       set((s) => ({
         files: { ...s.files, [info.fileId]: info },
@@ -293,7 +417,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           return {
             ...w,
             fileId: info.fileId,
-            title: info.name,
+            title: info.isPartialWindow
+              ? `${info.name} [${Math.round(info.windowStartSec ?? 0)}s–${Math.round(
+                  (info.windowStartSec ?? 0) + info.durationSec,
+                )}s]`
+              : info.name,
             selection: null,
             specParams: { ...w.specParams, channel: safeChannel },
             viewRange: {
@@ -310,6 +438,26 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     } catch (err) {
       set({ errorMessage: err instanceof Error ? err.message : 'Failed to load file' });
     }
+  },
+
+  shiftArchiveWindow: async (windowId, deltaWindows) => {
+    const state = get();
+    const win = state.windows.find((w) => w.windowId === windowId);
+    if (!win) return;
+    const file = state.files[win.fileId];
+    if (!file || !file.isPartialWindow) return;
+    const winLen = Math.max(5, Math.round(file.durationSec));
+    const curStart = file.windowStartSec ?? 0;
+    const totalDur = file.totalDurationSec ?? curStart + winLen;
+    const nextStart = Math.max(0, Math.min(Math.max(0, totalDur - winLen), curStart + deltaWindows * winLen));
+    if (Math.abs(nextStart - curStart) < 0.01) {
+      set({ statusMessage: deltaWindows < 0 ? 'Already at start of recording' : 'Already at end of recording' });
+      return;
+    }
+    await get().loadAudioIntoWindow(windowId, file.sourceId, file.uri, {
+      startSec: nextStart,
+      maxDurationSec: winLen,
+    });
   },
 
   stepFileInFolder: async (windowId, delta) => {
@@ -839,11 +987,15 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       id: `ann-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       modified: true,
     };
-    set((s) => ({
-      annotations: [...s.annotations, rec],
-      selectedAnnotationId: rec.id,
-      statusMessage: `Logged annotation "${rec.comment || '(blank)'}" [${rec.startTimeSec.toFixed(3)}s – ${rec.endTimeSec.toFixed(3)}s]`,
-    }));
+    set((s) => {
+      const next = [...s.annotations, rec];
+      persistAnnotations(next, s.nonAnnotationLines);
+      return {
+        annotations: next,
+        selectedAnnotationId: rec.id,
+        statusMessage: `Logged annotation "${rec.comment || '(blank)'}" [${rec.startTimeSec.toFixed(3)}s – ${rec.endTimeSec.toFixed(3)}s]`,
+      };
+    });
     return rec;
   },
 
@@ -854,8 +1006,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
             (a) => a.soundfile.toLowerCase() !== replaceForSoundfile.toLowerCase(),
           )
         : s.annotations;
+      const next = [...base, ...detections];
+      persistAnnotations(next, s.nonAnnotationLines);
       return {
-        annotations: [...base, ...detections],
+        annotations: next,
         selectedAnnotationId: detections[0]?.id ?? s.selectedAnnotationId,
         statusMessage: `Added ${detections.length} detected sound annotations`,
       };
@@ -888,19 +1042,64 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     });
   },
 
+  logSelectionWithMeasurements: (measurements, comment = '') => {
+    const state = get();
+    const win = state.windows.find((w) => w.windowId === state.activeWindowId);
+    if (!win || !win.selection) return null;
+    const file = state.files[win.fileId];
+    if (!file) return null;
+    const sel = win.selection;
+    return state.addAnnotation({
+      soundfile: file.name,
+      channel: sel.channel,
+      startTimeSec: Math.min(sel.startSec, sel.endSec),
+      endTimeSec: Math.max(sel.startSec, sel.endSec),
+      lowFreqHz: Math.min(sel.lowFreqHz, sel.highFreqHz),
+      highFreqHz: Math.max(sel.lowFreqHz, sel.highFreqHz),
+      comment,
+      notes: `Peak ${Math.round(measurements.peakFreqHz)} Hz, BW90 ${Math.round(measurements.bw90Hz)} Hz, SNR ${measurements.snrDb.toFixed(1)} dB`,
+      extraFields: {
+        PeakFreqHz: Number(measurements.peakFreqHz.toFixed(1)),
+        CentroidHz: Number(measurements.centroidFreqHz.toFixed(1)),
+        BW90Hz: Number(measurements.bw90Hz.toFixed(1)),
+        Q5FreqHz: Number(measurements.q5FreqHz.toFixed(1)),
+        Q50FreqHz: Number(measurements.q50FreqHz.toFixed(1)),
+        Q95FreqHz: Number(measurements.q95FreqHz.toFixed(1)),
+        RMSdB: Number(measurements.rmsDb.toFixed(1)),
+        PeakdB: Number(measurements.peakDb.toFixed(1)),
+        SNRdB: Number(measurements.snrDb.toFixed(1)),
+      },
+    });
+  },
+
+  applySuggestedDetectParams: (params) =>
+    set({
+      suggestedDetectParams: params,
+      showDetectModal: true,
+      statusMessage: `Loaded AI-suggested Detect Sounds parameters (${Math.round(params.minFreqHz)}–${Math.round(params.maxFreqHz)} Hz)`,
+    }),
+
+  clearSuggestedDetectParams: () => set({ suggestedDetectParams: null }),
+
   updateAnnotation: (id, patch) =>
-    set((s) => ({
-      annotations: s.annotations.map((a) =>
+    set((s) => {
+      const next = s.annotations.map((a) =>
         a.id === id ? { ...a, ...patch, modified: true } : a,
-      ),
-    })),
+      );
+      persistAnnotations(next, s.nonAnnotationLines);
+      return { annotations: next };
+    }),
 
   deleteAnnotation: (id) =>
-    set((s) => ({
-      annotations: s.annotations.filter((a) => a.id !== id),
-      selectedAnnotationId: s.selectedAnnotationId === id ? null : s.selectedAnnotationId,
-      redefineAnnotationId: s.redefineAnnotationId === id ? null : s.redefineAnnotationId,
-    })),
+    set((s) => {
+      const next = s.annotations.filter((a) => a.id !== id);
+      persistAnnotations(next, s.nonAnnotationLines);
+      return {
+        annotations: next,
+        selectedAnnotationId: s.selectedAnnotationId === id ? null : s.selectedAnnotationId,
+        redefineAnnotationId: s.redefineAnnotationId === id ? null : s.redefineAnnotationId,
+      };
+    }),
 
   selectAnnotation: (id, jumpToView = false) => {
     set({ selectedAnnotationId: id });
@@ -1001,7 +1200,22 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set({ statusMessage: `Saved ${res.count} annotations to ${res.savedUri}` });
   },
 
-  setModalState: (key, value) => set({ [key]: value }),
+  setModalState: (key, value) => {
+    // On mobile viewports, keep only one drawer/panel open at a time so the screen stays usable
+    if (
+      value &&
+      isNarrowMobileViewport() &&
+      (key === 'showSpecPanel' || key === 'showAiPanel' || key === 'showAnnotationDrawer')
+    ) {
+      set({
+        showSpecPanel: key === 'showSpecPanel',
+        showAiPanel: key === 'showAiPanel',
+        showAnnotationDrawer: key === 'showAnnotationDrawer',
+      });
+      return;
+    }
+    set({ [key]: value });
+  },
 }));
 
 export function getCachedSpectrogram(

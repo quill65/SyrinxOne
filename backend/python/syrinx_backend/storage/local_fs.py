@@ -43,7 +43,7 @@ class LocalFilesystemSource(AudioDataSource):
                 ) from exc
         return candidate
 
-    async def list_items(self, prefix: str = "") -> list[BrowseEntry]:
+    async def list_items(self, prefix: str = "", limit: int = 250) -> list[BrowseEntry]:
         if prefix:
             target = self._resolve(prefix)
         elif self.root_dir is not None:
@@ -78,6 +78,8 @@ class LocalFilesystemSource(AudioDataSource):
             return entries
 
         for child in children:
+            if len(entries) >= max(1, limit):
+                break
             if child.name.startswith("."):
                 continue
             is_dir = child.is_dir()

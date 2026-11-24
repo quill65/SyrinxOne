@@ -4,14 +4,19 @@ import type {
   AnnotationRecord,
 } from '../types/annotations.js';
 import type {
+  AiAnalyzeRequest,
+  AiAnalyzeResponse,
   AudioFileInfo,
   BrowseEntry,
   ClipSaveRequest,
   ClipSaveResponse,
+  CreateSourceRequest,
   DataSourceInfo,
   DetectSoundsRequest,
   DetectSoundsResponse,
   DisplaySettings,
+  MeasureSelectionRequest,
+  SelectionMeasurements,
   SpectrogramMatrix,
   SpectrogramParams,
   WaveformOverview,
@@ -25,9 +30,21 @@ export interface EngineConfig {
 export interface AudioEngineClient {
   health(): Promise<{ status: string; version: string }>;
   listSources(): Promise<DataSourceInfo[]>;
-  browseSource(sourceId: string, prefix?: string): Promise<BrowseEntry[]>;
-  openAudio(sourceId: string, uri: string): Promise<AudioFileInfo>;
+  addSource(req: CreateSourceRequest): Promise<DataSourceInfo>;
+  removeSource(sourceId: string): Promise<{ removed: string }>;
+  browseSource(sourceId: string, prefix?: string, limit?: number): Promise<BrowseEntry[]>;
+  openAudio(
+    sourceId: string,
+    uri: string,
+    options?: { startSec?: number; maxDurationSec?: number },
+  ): Promise<AudioFileInfo>;
+  openAudioUrl(
+    url: string,
+    options?: { startSec?: number; maxDurationSec?: number },
+  ): Promise<AudioFileInfo>;
   uploadAudio(file: File): Promise<AudioFileInfo>;
+  measureSelection(fileId: string, req: MeasureSelectionRequest): Promise<SelectionMeasurements>;
+  analyzeWithAi(req: AiAnalyzeRequest): Promise<AiAnalyzeResponse>;
   getWaveform(
     fileId: string,
     channel: number,
@@ -122,16 +139,47 @@ export class HttpAudioEngineClient implements AudioEngineClient {
     return this.requestJson('/api/sources');
   }
 
-  async browseSource(sourceId: string, prefix = ''): Promise<BrowseEntry[]> {
-    const q = new URLSearchParams({ prefix });
+  async addSource(req: CreateSourceRequest): Promise<DataSourceInfo> {
+    return this.requestJson('/api/sources', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  }
+
+  async removeSource(sourceId: string): Promise<{ removed: string }> {
+    return this.requestJson(`/api/sources/${encodeURIComponent(sourceId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async browseSource(sourceId: string, prefix = '', limit = 250): Promise<BrowseEntry[]> {
+    const q = new URLSearchParams({ prefix, limit: String(limit) });
     return this.requestJson(`/api/sources/${encodeURIComponent(sourceId)}/browse?${q.toString()}`);
   }
 
-  async openAudio(sourceId: string, uri: string): Promise<AudioFileInfo> {
+  async openAudio(
+    sourceId: string,
+    uri: string,
+    options?: { startSec?: number; maxDurationSec?: number },
+  ): Promise<AudioFileInfo> {
     return this.requestJson('/api/audio/open', {
       method: 'POST',
-      body: JSON.stringify({ sourceId, uri }),
+      body: JSON.stringify({
+        sourceId,
+        uri,
+        ...(options?.startSec !== undefined ? { startSec: options.startSec } : {}),
+        ...(options?.maxDurationSec !== undefined
+          ? { maxDurationSec: options.maxDurationSec }
+          : {}),
+      }),
     });
+  }
+
+  async openAudioUrl(
+    url: string,
+    options?: { startSec?: number; maxDurationSec?: number },
+  ): Promise<AudioFileInfo> {
+    return this.openAudio('http', url, options);
   }
 
   async uploadAudio(file: File): Promise<AudioFileInfo> {
@@ -140,6 +188,23 @@ export class HttpAudioEngineClient implements AudioEngineClient {
     return this.requestJson('/api/audio/upload', {
       method: 'POST',
       body: form,
+    });
+  }
+
+  async measureSelection(
+    fileId: string,
+    req: MeasureSelectionRequest,
+  ): Promise<SelectionMeasurements> {
+    return this.requestJson(`/api/audio/${encodeURIComponent(fileId)}/measure`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  }
+
+  async analyzeWithAi(req: AiAnalyzeRequest): Promise<AiAnalyzeResponse> {
+    return this.requestJson('/api/ai/analyze', {
+      method: 'POST',
+      body: JSON.stringify(req),
     });
   }
 

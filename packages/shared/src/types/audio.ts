@@ -10,12 +10,32 @@ export type ColormapName =
   | 'inferno'
   | 'turbo';
 
+export type DataSourceKind = 'local_fs' | 's3' | 'gcs' | 'gdrive' | 'http' | 'custom';
+
 export interface DataSourceInfo {
   sourceId: string;
   displayName: string;
-  kind: 'local_fs' | 's3' | 'gcs' | 'http' | 'custom';
+  kind: DataSourceKind;
   readOnly: boolean;
   rootPath?: string;
+  description?: string;
+  anonymous?: boolean;
+  removable?: boolean;
+}
+
+export interface CreateSourceRequest {
+  kind: 's3' | 'gcs' | 'gdrive' | 'http';
+  sourceId?: string;
+  displayName?: string;
+  bucket?: string;
+  prefix?: string;
+  region?: string;
+  endpointUrl?: string;
+  anonymous?: boolean;
+  folderOrUrl?: string;
+  apiKey?: string;
+  oauthToken?: string;
+  readOnly?: boolean;
 }
 
 export interface BrowseEntry {
@@ -38,6 +58,84 @@ export interface AudioFileInfo {
   format: string;
   subtype: string;
   startDateTimeIso?: string | null;
+  windowStartSec?: number;
+  totalDurationSec?: number;
+  isPartialWindow?: boolean;
+}
+
+export interface MeasureSelectionRequest {
+  channel: number;
+  startSec: number;
+  endSec: number;
+  lowFreqHz: number;
+  highFreqHz: number;
+  fftSize?: number;
+  hopSize?: number;
+}
+
+export interface SelectionMeasurements {
+  durationSec: number;
+  lowFreqHz: number;
+  highFreqHz: number;
+  bandwidthHz: number;
+  peakFreqHz: number;
+  centroidFreqHz: number;
+  q5FreqHz: number;
+  q50FreqHz: number;
+  q95FreqHz: number;
+  bw90Hz: number;
+  timeOfPeakSec: number;
+  rmsDb: number;
+  peakDb: number;
+  noiseFloorDb: number;
+  snrDb: number;
+}
+
+export interface AiChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface SuggestedDetectParams {
+  minFreqHz: number;
+  maxFreqHz: number;
+  triggerThresholdDb: number;
+  minSoundDurSec: number;
+  maxSilenceGapSec: number;
+  comment: string;
+}
+
+export interface AiAnalyzeRequest {
+  fileId: string;
+  channel: number;
+  prompt: string;
+  history?: AiChatMessage[];
+  selection?: {
+    startSec: number;
+    endSec: number;
+    lowFreqHz: number;
+    highFreqHz: number;
+  };
+  viewRange?: {
+    startSec: number;
+    endSec: number;
+    minFreqHz: number;
+    maxFreqHz: number;
+  };
+  specParams?: SpectrogramParams;
+  displaySettings?: DisplaySettings;
+  annotations?: import('./annotations.js').AnnotationRecord[];
+  includeSpectrogramImage?: boolean;
+  apiKey?: string;
+  model?: string;
+}
+
+export interface AiAnalyzeResponse {
+  answer: string;
+  modelUsed: string;
+  measurements?: SelectionMeasurements;
+  suggestedDetectParams?: SuggestedDetectParams;
+  suggestedLabels: string[];
 }
 
 export interface SpectrogramParams {

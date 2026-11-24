@@ -27,6 +27,18 @@
 3. **Classic MDI Workspace (`apps/web`)**:
    - Floating, draggable, resizable, z-ordered child windows inside an MDI canvas with Tile Grid, Tile Horizontal, Tile Vertical, Cascade, Resize All to Active, Fit Screen, Titlebar toggles, and synchronized linked views.
 
+## Phase 1.5 — Web Acoustic Viewer, Cloud Archive Connectors & AI Explorer
+
+- **Web-First Cloud & Archive Connectors**:
+  - Runtime source management (`POST/DELETE /api/sources`) with 1-click public bioacoustic archive presets (**MBARI Pacific Ocean Sound on AWS Open Data**, **NOAA NCEI Passive Acoustic Data Archive on GCS**) using anonymous public S3/GCS HTTPS APIs (zero cloud credentials required).
+  - **Google Drive** connector (public/shared file & folder links + optional API key / OAuth token for private folders), **Direct Audio URL** paste, and workspace drag-and-drop.
+  - Large archive file windowed loading (HTTP `Range` partial WAV/FLAC reads so multi-hundred-MB hydrophone files open rapidly in the browser) and paginated/searchable directory browsing.
+- **Syrinx Display, Acoustic Measurements & Annotation Polish**:
+  - Server-computed **Acoustic Measurement Inspector** (`peakFreqHz`, `centroidFreqHz`, `bw90Hz`, `q5/q50/q95FreqHz`, `rmsDb`, `peakDb`, `snrDb`, `timeOfPeakSec`) with 1-click logging into Syrinx/Raven annotation `extraFields`.
+  - Browser auto-save recovery for annotations (`localStorage`) alongside Syrinx `.txt`, Raven, CSV, and JSON import/export.
+- **AI Bioacoustic Analytic Explorer**:
+  - Multimodal side panel pairing Python DSP measurements + clean spectrogram PNG + annotations with Gemini for deeper acoustic interpretation, pattern summaries, label suggestions, and 1-click **Detect Sounds** parameter recommendations.
+
 ## Phase 2+ Roadmap
 
 - Live desktop sound-card capture & triggered event recording (`TriggerEventDetector`, `CircularBuffer`)

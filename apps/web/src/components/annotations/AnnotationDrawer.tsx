@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Download, Plus, Trash2, Upload } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Plus, Trash2, Upload, X } from 'lucide-react';
 import type { AnnotationFormat } from '@syrinxone/shared';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 
@@ -18,6 +18,7 @@ export const AnnotationDrawer: React.FC = () => {
   const setAnnotationFilter = useWorkspaceStore((s) => s.setAnnotationFilter);
   const importAnnotationsFromText = useWorkspaceStore((s) => s.importAnnotationsFromText);
   const exportAnnotationsAsText = useWorkspaceStore((s) => s.exportAnnotationsAsText);
+  const setModalState = useWorkspaceStore((s) => s.setModalState);
 
   const [exportFmt, setExportFmt] = useState<AnnotationFormat>('syrinx_txt');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -168,6 +169,13 @@ export const AnnotationDrawer: React.FC = () => {
         </select>
         <button className="btn-small" onClick={() => void handleExportDownload()}>
           <Download size={12} /> Export
+        </button>
+        <button
+          className="mdi-win-btn"
+          onClick={() => setModalState('showAnnotationDrawer', false)}
+          title="Close Annotations drawer"
+        >
+          <X size={13} />
         </button>
       </div>
 
