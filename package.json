@@ -14,6 +14,8 @@
     "build": "npm run build --workspace=@syrinxone/shared && npm run build --workspace=@syrinxone/web && npm run build --workspace=@syrinxone/desktop-electron",
     "typecheck": "npm run typecheck --workspace=@syrinxone/shared && npm run typecheck --workspace=@syrinxone/web && npm run typecheck --workspace=@syrinxone/desktop-electron",
     "test:js": "npm run test --workspaces --if-present",
-    "export:ai-studio": "node scripts/export-ai-studio.mjs"
+    "export:ai-studio": "node scripts/export-ai-studio.mjs",
+    "ai-studio:push": "node scripts/sync-ai-studio.mjs push",
+    "ai-studio:pull": "node scripts/sync-ai-studio.mjs pull"
   }
 }

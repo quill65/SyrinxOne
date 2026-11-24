@@ -58,7 +58,17 @@ This creates `dist-ai-studio/` (gitignored on `master`) with:
 - `.env` pre-wired to `VITE_API_URL=https://syrinx-engine-466330924576.us-west1.run.app`
 
 ### Connecting Google AI Studio Build
-- **Via GitHub (`ai-studio` branch)**: Import `quill65/SyrinxOne` (branch `ai-studio`) into Google AI Studio Build — or upload the `dist-ai-studio/` folder/zip.
+1. Open [Google AI Studio — Build](https://aistudio.google.com/apps), click **`+` (Add files)** in the prompt bar -> **Import from GitHub**.
+2. Select **`quill65/SyrinxOne-Web:main`** (the dedicated flat companion repo) -> **Import repository**.
+3. **Two-Way Sync Between `SyrinxOne` and `SyrinxOne-Web`**:
+   - Push desktop monorepo updates out to AI Studio:
+     ```powershell
+     npm.cmd run ai-studio:push
+     ```
+   - Pull phone vibe-coded edits from AI Studio back into `apps/web/src` (after syncing to GitHub in AI Studio):
+     ```powershell
+     npm.cmd run ai-studio:pull
+     ```
 - **Switching Backend / Token at Runtime**:
   - Tap the **S1 SyrinxOne** badge in the top-left toolbar to change the Cloud Run URL or enter a Bearer token (`localStorage`-persisted).
   - Or share a one-click link: `https://syrinx-web-466330924576.us-west1.run.app/?api=https://syrinx-engine-466330924576.us-west1.run.app&token=YOUR_SECRET` (the `token` parameter is automatically saved to `localStorage` and stripped from the visible address bar).
