@@ -52,6 +52,10 @@ fs.mkdirSync(outDir, { recursive: true });
 
 // 1. Copy web HTML + src + inline shared src into src/shared
 fs.copyFileSync(path.join(webDir, 'index.html'), path.join(outDir, 'index.html'));
+const firebaseCfgPath = path.join(webDir, 'firebase-applet-config.json');
+if (fs.existsSync(firebaseCfgPath)) {
+  fs.copyFileSync(firebaseCfgPath, path.join(outDir, 'firebase-applet-config.json'));
+}
 copyDirRecursive(path.join(webDir, 'src'), path.join(outDir, 'src'));
 copyDirRecursive(sharedSrcDir, path.join(outDir, 'src', 'shared'));
 

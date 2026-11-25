@@ -153,6 +153,10 @@ function syncPull() {
     if (fs.existsSync(pulledIndex)) {
       fs.copyFileSync(pulledIndex, path.join(webDir, 'index.html'));
     }
+    const pulledFirebaseCfg = path.join(cloneDir, 'firebase-applet-config.json');
+    if (fs.existsSync(pulledFirebaseCfg)) {
+      fs.copyFileSync(pulledFirebaseCfg, path.join(webDir, 'firebase-applet-config.json'));
+    }
 
     const pulledSrc = path.join(cloneDir, 'src');
     if (!fs.existsSync(pulledSrc)) {
