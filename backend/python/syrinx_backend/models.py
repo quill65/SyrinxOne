@@ -18,7 +18,7 @@ class CamelModel(BaseModel):
 
 
 WindowType = Literal["blackman", "hamming", "hann", "rect"]
-DspMode = Literal["modern_stft", "classic_syrinx"]
+DspMode = Literal["modern_stft"]
 ColormapName = Literal[
     "grayscale_bow", "grayscale_wob", "viridis", "magma", "inferno", "turbo"
 ]
@@ -254,8 +254,6 @@ class AiSpecParams(CamelModel):
     window_type: WindowType = "hann"
     dsp_mode: DspMode = "modern_stft"
     pop_filter: bool = False
-    classic_gain: float = 1.0
-    classic_white_thresh: float = 0.0
 
 
 class AiDisplaySettings(CamelModel):

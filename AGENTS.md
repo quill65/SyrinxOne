@@ -9,7 +9,7 @@
 - **Classic Syrinx C++ Reference**:
   - `syrinx_original_cpp/` (gitignored) is a pruned, **read-only** reference of the active `Syrinx.vcproj` VC++ codebase. Never edit files inside `syrinx_original_cpp/` and never commit it.
   - Maintain round-trip compatibility with classic Syrinx tab-delimited annotation logs (`fieldkey:` + `an:` and legacy `key: value` pairs, `@`/`\x02` notes escaping, custom extra fields, preserved non-annotation header lines).
-  - Keep spectrogram rendering modular: primary GPU WebGL2 (`Float32` STFT) while retaining `classic_syrinx` DSP mode and Python `server_bitmap` PNG fallback.
+  - Keep spectrogram rendering modular: primary GPU WebGL2 (`Float32` `modern_stft` STFT) while retaining Python `server_bitmap` PNG fallback.
 
 ## Tooling & Commands
 - **Python**: Always use `uv` (`uv sync`, `uv add`, `uv run`) or `backend/python/.venv/Scripts/python.exe` — never install packages globally with `pip`.

@@ -7,7 +7,6 @@ from PIL import Image
 
 from syrinx_backend.dsp.stft_engine import (
     apply_pop_filter,
-    build_classic_window,
     compute_spectrogram,
     render_spectrogram_png,
 )
@@ -41,29 +40,23 @@ def test_modern_stft_finds_exact_tone_frequency() -> None:
     assert abs(peak_hz - target_hz) <= res.freq_step_hz
 
 
-def test_classic_syrinx_dsp_mode_and_windows() -> None:
+def test_modern_stft_supports_all_window_types() -> None:
     sr = 22050
     target_hz = 4000.0
     sig = _make_sine(target_hz, sr=sr, duration_sec=0.5)
     for win in ("blackman", "hamming", "hann", "rect"):
-        w = build_classic_window(512, win)  # type: ignore[arg-type]
-        assert len(w) == 512
-        assert np.all(w > 0)
-
-    res = compute_spectrogram(
-        sig,
-        sample_rate=sr,
-        fft_size=512,
-        hop_size=128,
-        window_type="blackman",
-        dsp_mode="classic_syrinx",
-        classic_gain=2.0,
-        classic_white_thresh=10.0,
-    )
-    assert res.dsp_mode == "classic_syrinx"
-    mean_spectrum = np.mean(res.matrix, axis=0)
-    peak_hz = int(np.argmax(mean_spectrum)) * res.freq_step_hz
-    assert abs(peak_hz - target_hz) <= res.freq_step_hz
+        res = compute_spectrogram(
+            sig,
+            sample_rate=sr,
+            fft_size=512,
+            hop_size=128,
+            window_type=win,  # type: ignore[arg-type]
+            dsp_mode="modern_stft",
+        )
+        assert res.dsp_mode == "modern_stft"
+        mean_spectrum = np.mean(res.matrix, axis=0)
+        peak_hz = int(np.argmax(mean_spectrum)) * res.freq_step_hz
+        assert abs(peak_hz - target_hz) <= res.freq_step_hz
 
 
 def test_pop_filter_suppresses_broadband_click() -> None:

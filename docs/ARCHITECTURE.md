@@ -18,9 +18,8 @@
 
 2. **Pluggable Python Backend (`backend/python`)**:
    - **Storage Adapters (`storage/`)**: `AudioDataSource` and `AnnotationStore` ABCs supporting `LocalFilesystemSource`, `S3AudioDataSource`, `GCSAudioDataSource`, `HttpUrlAudioDataSource`, and custom Python lab plugins.
-   - **Dual-Mode DSP (`dsp/`)**:
-     - `modern_stft` (default): NumPy/SciPy Float32 dB STFT streamed as compact binary Float32 frames to WebGL2 shaders for instant 60fps contrast/gain/threshold/colormap/zoom adjustments.
-     - `classic_syrinx`: Exact windowing, magnitude scaling, and pop filter ported from legacy `FFTTools.cpp` / `SpecProfile.cpp`.
+   - **Modular DSP (`dsp/`)**:
+     - `modern_stft`: NumPy/SciPy Float32 dB STFT (Hann, Blackman, Hamming, Rectangular windows + optional pop filter) streamed as compact binary Float32 frames to WebGL2 shaders for instant 60fps contrast/gain/threshold/colormap/zoom adjustments.
      - `server_bitmap` fallback: Server-rendered PNG spectrogram tiles when GPU rendering is disabled or exact bitmap parity is preferred.
    - **Annotations (`annotations/`)**: Faithful round-trip compatibility with classic Syrinx `.txt`/`.log` files (`fieldkey:` + `an:` and legacy `key: value` pair format, `@`/`\x02` newline escaping, custom extra fields, preserved non-annotation header lines) plus Raven selection tables, CSV, and JSON.
 

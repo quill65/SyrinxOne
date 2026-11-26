@@ -1,5 +1,5 @@
 export type WindowType = 'blackman' | 'hamming' | 'hann' | 'rect';
-export type DspMode = 'modern_stft' | 'classic_syrinx';
+export type DspMode = 'modern_stft';
 export type RenderMode = 'webgl_float32' | 'server_bitmap';
 export type TimeScaleMode = 'stretch' | 'fixed';
 export type ColormapName =
@@ -145,8 +145,6 @@ export interface SpectrogramParams {
   windowType: WindowType;
   dspMode: DspMode;
   popFilter: boolean;
-  classicGain: number;
-  classicWhiteThresh: number;
 }
 
 export interface DisplaySettings {
@@ -252,8 +250,6 @@ export const DEFAULT_SPECTROGRAM_PARAMS: SpectrogramParams = {
   windowType: 'hann',
   dspMode: 'modern_stft',
   popFilter: false,
-  classicGain: 1,
-  classicWhiteThresh: 0,
 };
 
 export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {

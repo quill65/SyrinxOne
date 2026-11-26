@@ -82,7 +82,7 @@ def test_full_audio_spectrogram_clip_and_annotation_api(tmp_path: Path) -> None:
 
     # PNG Bitmap fallback endpoint
     png_resp = client.get(
-        f"/api/audio/{file_id}/spectrogram.png?channel=1&dsp_mode=classic_syrinx&colormap=grayscale_bow&token=secret-token"
+        f"/api/audio/{file_id}/spectrogram.png?channel=1&dsp_mode=modern_stft&colormap=grayscale_bow&token=secret-token"
     )
     assert png_resp.status_code == 200
     assert png_resp.headers["content-type"] == "image/png"
