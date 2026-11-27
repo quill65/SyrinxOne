@@ -6,7 +6,20 @@ from typing import Literal
 
 from syrinx_backend.models import BrowseEntry, DataSourceInfo, DataSourceKind
 
-AUDIO_EXTENSIONS = {".wav", ".wave", ".flac", ".aif", ".aiff", ".aifc", ".ogg", ".mp3", ".m4a"}
+AUDIO_EXTENSIONS = {
+    ".wav",
+    ".wave",
+    ".flac",
+    ".aif",
+    ".aiff",
+    ".aifc",
+    ".ogg",
+    ".opus",
+    ".mp3",
+    ".m4a",
+    ".aac",
+    ".webm",
+}
 ANNOTATION_EXTENSIONS = {".txt", ".log", ".csv", ".json", ".tsv"}
 
 

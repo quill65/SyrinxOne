@@ -3,7 +3,10 @@ from __future__ import annotations
 import hashlib
 import io
 import re
+import shutil
 import struct
+import subprocess
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -171,6 +174,64 @@ class AudioSessionCache:
             oldest_key = next(iter(self._items))
             del self._items[oldest_key]
 
+    def _decode_via_ffmpeg(
+        self,
+        local_path: Path | None,
+        raw_bytes: bytes | None,
+        name: str,
+        start_sec: float,
+        max_duration_sec: float | None,
+    ) -> tuple[np.ndarray, int, float, str, str]:
+        ffmpeg_bin = shutil.which("ffmpeg")
+        if not ffmpeg_bin:
+            raise RuntimeError(
+                f"Cannot decode '{name}' with libsndfile and ffmpeg is not installed on PATH."
+            )
+
+        temp_in: Path | None = None
+        try:
+            if local_path is not None and local_path.is_file():
+                in_path = local_path
+            elif raw_bytes is not None:
+                suffix = Path(name).suffix or ".bin"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    tmp.write(raw_bytes)
+                    temp_in = Path(tmp.name)
+                in_path = temp_in
+            else:
+                raise FileNotFoundError(f"Audio source could not be read: {name}")
+
+            # Decode to IEEE float WAV in memory so soundfile can read exact sr/channels/samples
+            cmd = [ffmpeg_bin, "-v", "error", "-i", str(in_path), "-vn", "-acodec", "pcm_f32le", "-f", "wav", "pipe:1"]
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                check=False,
+                timeout=60,
+            )
+            if proc.returncode != 0 or not proc.stdout:
+                err_msg = proc.stderr.decode("utf-8", errors="ignore").strip()[:300]
+                raise RuntimeError(f"ffmpeg failed to decode '{name}': {err_msg or 'unknown error'}")
+
+            with sf.SoundFile(io.BytesIO(proc.stdout)) as handle:
+                sr = int(handle.samplerate)
+                total_frames = int(len(handle))
+                total_dur = float(total_frames / sr) if sr > 0 else 0.0
+                start_frame = max(0, min(total_frames, int(round(start_sec * sr))))
+                if start_frame > 0:
+                    handle.seek(start_frame)
+                frames_to_read = (
+                    int(round(max_duration_sec * sr))
+                    if max_duration_sec is not None and max_duration_sec > 0
+                    else -1
+                )
+                data = handle.read(frames=frames_to_read, dtype="float32", always_2d=True)
+            ext_fmt = Path(name).suffix.lstrip(".").upper() or "FFMPEG"
+            return data, sr, total_dur, ext_fmt, "FFMPEG_FLOAT"
+        finally:
+            if temp_in is not None:
+                temp_in.unlink(missing_ok=True)
+
     def _decode_audio(
         self,
         source_id: str,
@@ -181,40 +242,49 @@ class AudioSessionCache:
         start_sec: float = 0.0,
         max_duration_sec: float | None = None,
     ) -> LoadedAudio:
-        if local_path is not None and local_path.is_file():
-            with sf.SoundFile(str(local_path)) as handle:
-                sr = int(handle.samplerate)
-                total_frames = int(len(handle))
-                total_dur = float(total_frames / sr) if sr > 0 else 0.0
-                start_frame = max(0, min(total_frames, int(round(start_sec * sr))))
-                if start_frame > 0:
-                    handle.seek(start_frame)
-                frames_to_read = (
-                    int(round(max_duration_sec * sr))
-                    if max_duration_sec is not None and max_duration_sec > 0
-                    else -1
-                )
-                data = handle.read(frames=frames_to_read, dtype="float32", always_2d=True)
-                fmt = str(handle.format)
-                subtype = str(handle.subtype)
-        elif raw_bytes is not None:
-            with sf.SoundFile(io.BytesIO(raw_bytes)) as handle:
-                sr = int(handle.samplerate)
-                total_frames = int(len(handle))
-                total_dur = float(total_frames / sr) if sr > 0 else 0.0
-                start_frame = max(0, min(total_frames, int(round(start_sec * sr))))
-                if start_frame > 0:
-                    handle.seek(start_frame)
-                frames_to_read = (
-                    int(round(max_duration_sec * sr))
-                    if max_duration_sec is not None and max_duration_sec > 0
-                    else -1
-                )
-                data = handle.read(frames=frames_to_read, dtype="float32", always_2d=True)
-                fmt = str(handle.format)
-                subtype = str(handle.subtype)
-        else:
-            raise FileNotFoundError(f"Audio source could not be read: {uri}")
+        try:
+            if local_path is not None and local_path.is_file():
+                with sf.SoundFile(str(local_path)) as handle:
+                    sr = int(handle.samplerate)
+                    total_frames = int(len(handle))
+                    total_dur = float(total_frames / sr) if sr > 0 else 0.0
+                    start_frame = max(0, min(total_frames, int(round(start_sec * sr))))
+                    if start_frame > 0:
+                        handle.seek(start_frame)
+                    frames_to_read = (
+                        int(round(max_duration_sec * sr))
+                        if max_duration_sec is not None and max_duration_sec > 0
+                        else -1
+                    )
+                    data = handle.read(frames=frames_to_read, dtype="float32", always_2d=True)
+                    fmt = str(handle.format)
+                    subtype = str(handle.subtype)
+            elif raw_bytes is not None:
+                with sf.SoundFile(io.BytesIO(raw_bytes)) as handle:
+                    sr = int(handle.samplerate)
+                    total_frames = int(len(handle))
+                    total_dur = float(total_frames / sr) if sr > 0 else 0.0
+                    start_frame = max(0, min(total_frames, int(round(start_sec * sr))))
+                    if start_frame > 0:
+                        handle.seek(start_frame)
+                    frames_to_read = (
+                        int(round(max_duration_sec * sr))
+                        if max_duration_sec is not None and max_duration_sec > 0
+                        else -1
+                    )
+                    data = handle.read(frames=frames_to_read, dtype="float32", always_2d=True)
+                    fmt = str(handle.format)
+                    subtype = str(handle.subtype)
+            else:
+                raise FileNotFoundError(f"Audio source could not be read: {uri}")
+        except sf.LibsndfileError:
+            data, sr, total_dur, fmt, subtype = self._decode_via_ffmpeg(
+                local_path=local_path,
+                raw_bytes=raw_bytes,
+                name=name,
+                start_sec=start_sec,
+                max_duration_sec=max_duration_sec,
+            )
 
         samples = np.ascontiguousarray(data.T, dtype=np.float32)
         num_channels, num_frames = samples.shape

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
@@ -32,6 +31,9 @@ from syrinx_backend.models import (
     DataSourceInfo,
     DetectSoundsRequest,
     DetectSoundsResponse,
+    DiscoverSourcesRequest,
+    DiscoverSourcesResponse,
+    DiscoveryProviderInfo,
     DspMode,
     ExportAnnotationsTextRequest,
     ImportAnnotationsSourceRequest,
@@ -40,23 +42,25 @@ from syrinx_backend.models import (
     OpenAudioRequest,
     SaveAnnotationsSourceRequest,
     SelectionMeasurements,
+    SourceVerificationResult,
     WaveformOverview,
     WindowType,
 )
 from syrinx_backend.storage.base import SourceRegistry
 from syrinx_backend.storage.cloud_adapters import (
     GCSAudioDataSource,
-    GoogleDriveAudioDataSource,
     HttpUrlAudioDataSource,
     S3AudioDataSource,
     load_custom_source_plugins,
 )
+from syrinx_backend.storage.discovery import (
+    DiscoveryRegistry,
+    build_default_discovery_registry,
+    build_source_from_request,
+    discover_online_sources,
+    verify_audio_source,
+)
 from syrinx_backend.storage.local_fs import LocalFilesystemSource
-
-
-def _slugify_source_id(text: str, prefix: str) -> str:
-    clean = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:32]
-    return f"{prefix}_{clean}" if clean else prefix
 
 
 def _build_default_registry() -> SourceRegistry:
@@ -150,6 +154,7 @@ def _build_default_registry() -> SourceRegistry:
 def create_app(
     registry: SourceRegistry | None = None,
     api_token: str | None = None,
+    discovery_registry: DiscoveryRegistry | None = None,
 ) -> FastAPI:
     app = FastAPI(title="SyrinxOne Engine API", version=__version__)
 
@@ -174,10 +179,12 @@ def create_app(
     )
 
     source_registry = registry or _build_default_registry()
+    disc_registry = discovery_registry or build_default_discovery_registry()
     audio_cache = AudioSessionCache()
     auth_dep = Depends(verify_token_dependency(api_token))
 
     app.state.registry = source_registry
+    app.state.discovery_registry = disc_registry
     app.state.audio_cache = audio_cache
 
     @app.get("/api/health")
@@ -188,70 +195,40 @@ def create_app(
     async def list_sources() -> list[DataSourceInfo]:
         return source_registry.list_info()
 
+    @app.get(
+        "/api/sources/providers",
+        response_model=list[DiscoveryProviderInfo],
+        dependencies=[auth_dep],
+    )
+    async def list_discovery_providers() -> list[DiscoveryProviderInfo]:
+        return disc_registry.list_info()
+
+    @app.post(
+        "/api/sources/discover",
+        response_model=DiscoverSourcesResponse,
+        dependencies=[auth_dep],
+    )
+    async def discover_sources(req: DiscoverSourcesRequest) -> DiscoverSourcesResponse:
+        return await discover_online_sources(disc_registry, req)
+
+    @app.post(
+        "/api/sources/verify",
+        response_model=SourceVerificationResult,
+        dependencies=[auth_dep],
+    )
+    async def verify_source(req: CreateSourceRequest) -> SourceVerificationResult:
+        try:
+            source = build_source_from_request(req)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return await verify_audio_source(source)
+
     @app.post("/api/sources", response_model=DataSourceInfo, dependencies=[auth_dep])
     async def create_source(req: CreateSourceRequest) -> DataSourceInfo:
-        if req.kind == "s3":
-            if not req.bucket or not req.bucket.strip():
-                raise HTTPException(status_code=400, detail="S3 source requires a bucket name")
-            bucket = req.bucket.strip().removeprefix("s3://").split("/", 1)[0]
-            sid = req.source_id or _slugify_source_id(bucket, "s3")
-            source = S3AudioDataSource(
-                source_id=sid,
-                bucket=bucket,
-                prefix=req.prefix,
-                display_name=req.display_name or f"S3: {bucket}",
-                region=req.region,
-                endpoint_url=req.endpoint_url,
-                read_only=req.read_only or req.anonymous,
-                anonymous=req.anonymous,
-                description=f"s3://{bucket}/{req.prefix}".rstrip("/"),
-                removable=True,
-            )
-        elif req.kind == "gcs":
-            if not req.bucket or not req.bucket.strip():
-                raise HTTPException(status_code=400, detail="GCS source requires a bucket name")
-            bucket = req.bucket.strip().removeprefix("gs://").split("/", 1)[0]
-            sid = req.source_id or _slugify_source_id(bucket, "gcs")
-            source = GCSAudioDataSource(
-                source_id=sid,
-                bucket=bucket,
-                prefix=req.prefix,
-                display_name=req.display_name or f"GCS: {bucket}",
-                read_only=req.read_only or req.anonymous,
-                anonymous=req.anonymous,
-                description=f"gs://{bucket}/{req.prefix}".rstrip("/"),
-                removable=True,
-            )
-        elif req.kind == "gdrive":
-            if not req.folder_or_url or not req.folder_or_url.strip():
-                raise HTTPException(
-                    status_code=400,
-                    detail="Google Drive source requires a shared folder/file URL or Drive ID",
-                )
-            sid = req.source_id or _slugify_source_id(
-                req.display_name or req.folder_or_url[:18], "gdrive"
-            )
-            source = GoogleDriveAudioDataSource(
-                source_id=sid,
-                folder_or_url=req.folder_or_url,
-                display_name=req.display_name,
-                api_key=req.api_key,
-                oauth_token=req.oauth_token,
-                removable=True,
-            )
-        elif req.kind == "http":
-            raw_urls = req.folder_or_url or ""
-            urls = [u.strip() for u in re.split(r"[\n,]+", raw_urls) if u.strip()]
-            sid = req.source_id or _slugify_source_id(req.display_name or "urls", "http")
-            source = HttpUrlAudioDataSource(
-                source_id=sid,
-                display_name=req.display_name or "HTTP Audio Catalog",
-                catalog_urls=urls,
-                removable=True,
-            )
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported source kind: {req.kind}")
-
+        try:
+            source = build_source_from_request(req)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         source_registry.register(source)
         return source.info()
 

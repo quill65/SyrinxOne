@@ -25,7 +25,11 @@ ColormapName = Literal[
 AnnotationFormat = Literal["syrinx_txt", "raven_txt", "csv", "json"]
 
 
-DataSourceKind = Literal["local_fs", "s3", "gcs", "gdrive", "http", "custom"]
+DataSourceKind = str
+SourceAuthKind = Literal["none", "api_key", "oauth", "credentials"]
+SourceVerificationStatus = Literal[
+    "verified", "zipped_only", "auth_required", "incompatible", "error", "untested"
+]
 
 
 class DataSourceInfo(CamelModel):
@@ -40,7 +44,7 @@ class DataSourceInfo(CamelModel):
 
 
 class CreateSourceRequest(CamelModel):
-    kind: Literal["s3", "gcs", "gdrive", "http"]
+    kind: str
     source_id: str | None = None
     display_name: str | None = None
     bucket: str | None = None
@@ -49,9 +53,68 @@ class CreateSourceRequest(CamelModel):
     endpoint_url: str | None = None
     anonymous: bool = True
     folder_or_url: str | None = None
+    query: str | None = None
     api_key: str | None = None
     oauth_token: str | None = None
     read_only: bool = True
+    params: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+
+class DiscoveryProviderInfo(CamelModel):
+    provider_id: str
+    display_name: str
+    description: str
+    auth_required: bool = False
+    auth_kind: SourceAuthKind = "none"
+    auth_configured_on_server: bool = False
+    auth_hint: str | None = None
+    auth_docs_url: str | None = None
+
+
+class SourceVerificationResult(CamelModel):
+    status: SourceVerificationStatus = "untested"
+    streamable: bool = False
+    audio_file_count: int = 0
+    sample_rate_hz: int | None = None
+    num_channels: int | None = None
+    formats: list[str] = Field(default_factory=list)
+    supports_range: bool = False
+    sample_file_name: str | None = None
+    message: str = ""
+
+
+class DiscoveredSourceCandidate(CamelModel):
+    candidate_id: str
+    provider_id: str
+    provider_label: str
+    title: str
+    description: str
+    homepage_url: str | None = None
+    license: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    auth_required: bool = False
+    auth_kind: SourceAuthKind = "none"
+    auth_hint: str | None = None
+    auth_docs_url: str | None = None
+    connect_request: CreateSourceRequest
+    verification: SourceVerificationResult = Field(default_factory=SourceVerificationResult)
+
+
+class DiscoverSourcesRequest(CamelModel):
+    prompt: str
+    provider_ids: list[str] | None = None
+    provider_keys: dict[str, str] = Field(default_factory=dict)
+    verify_top_n: int = Field(default=6, ge=0, le=12)
+    limit: int = Field(default=12, ge=1, le=30)
+    gemini_api_key: str | None = None
+
+
+class DiscoverSourcesResponse(CamelModel):
+    prompt: str
+    normalized_terms: list[str] = Field(default_factory=list)
+    providers_queried: list[str] = Field(default_factory=list)
+    candidates: list[DiscoveredSourceCandidate] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class BrowseEntry(CamelModel):
