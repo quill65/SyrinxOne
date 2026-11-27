@@ -116,12 +116,55 @@ function syncPush() {
       run('git', ['remote', 'add', 'origin', remoteRepo], { cwd: cloneDir });
     }
 
-    // 3. Mirror exported bundle into cloneDir (preserving .git/)
-    for (const entry of fs.readdirSync(cloneDir)) {
-      if (entry === '.git') continue;
-      fs.rmSync(path.join(cloneDir, entry), { recursive: true, force: true });
+    // 3. Mirror exported bundle into cloneDir while preserving .git/ and AI Studio runtime files
+    const preservedTopLevel = new Set([
+      '.git',
+      'server.ts',
+      'bun.lock',
+      '.env.example',
+      'metadata.json',
+      'package.json',
+    ]);
+    const hadRemotePkg = fs.existsSync(path.join(cloneDir, 'package.json'));
+
+    if (remoteHasBranch) {
+      // Remove stale files in src/ and mirror src/ cleanly from exportDir
+      copyDirClean(path.join(exportDir, 'src'), path.join(cloneDir, 'src'));
+
+      // Copy non-preserved top-level files from exportDir (index.html, vite.config.ts, tsconfig.json, .env, etc.)
+      for (const entry of fs.readdirSync(exportDir, { withFileTypes: true })) {
+        if (entry.name === 'src' || preservedTopLevel.has(entry.name)) continue;
+        const srcPath = path.join(exportDir, entry.name);
+        const dstPath = path.join(cloneDir, entry.name);
+        if (entry.isFile()) {
+          fs.copyFileSync(srcPath, dstPath);
+        }
+      }
+
+      // Merge any newly added web dependencies into AI Studio's existing package.json
+      if (hadRemotePkg) {
+        const remotePkgPath = path.join(cloneDir, 'package.json');
+        const exportPkg = JSON.parse(fs.readFileSync(path.join(exportDir, 'package.json'), 'utf8'));
+        const remotePkg = JSON.parse(fs.readFileSync(remotePkgPath, 'utf8'));
+        remotePkg.dependencies = {
+          ...(exportPkg.dependencies ?? {}),
+          ...(remotePkg.dependencies ?? {}),
+        };
+        remotePkg.devDependencies = {
+          ...(exportPkg.devDependencies ?? {}),
+          ...(remotePkg.devDependencies ?? {}),
+        };
+        fs.writeFileSync(remotePkgPath, JSON.stringify(remotePkg, null, 2) + '\n', 'utf8');
+      } else {
+        fs.copyFileSync(path.join(exportDir, 'package.json'), path.join(cloneDir, 'package.json'));
+      }
+    } else {
+      for (const entry of fs.readdirSync(cloneDir)) {
+        if (entry === '.git') continue;
+        fs.rmSync(path.join(cloneDir, entry), { recursive: true, force: true });
+      }
+      copyDirClean(exportDir, cloneDir);
     }
-    copyDirClean(exportDir, cloneDir);
 
     // 4. Commit and push if anything changed
     run('git', ['add', '-A'], { cwd: cloneDir });
