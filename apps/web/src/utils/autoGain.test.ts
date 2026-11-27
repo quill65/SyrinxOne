@@ -20,7 +20,6 @@ function makeSyntheticSpec(
 
   for (let t = 0; t < numTimeBins; t++) {
     for (let f = 0; f < numFreqBins; f++) {
-      // Deterministic pseudo-Gaussian spread around noiseDb
       const wave = Math.sin(t * 1.7 + f * 2.3) * 0.6 + Math.cos(t * 0.9 - f * 1.1) * 0.4;
       let v = noiseDb + wave * noiseJitterDb;
       if (dcSpikeDb !== undefined && f === 0) {
@@ -60,22 +59,31 @@ function mapLevel(valDb: number, gainDb: number, floor: number): number {
 }
 
 describe('computeAutoGain', () => {
-  it('boosts faint whale signal near peak contrast while snapping background noise to 0', () => {
+  it('anchors gain to background noise on moderate-to-high SNR recordings with low Floor (~2%)', () => {
+    // Matches real recording profile: ambient noise around -64 dB (ceiling ~ -60 dB), target peak -28 dB
+    const mat = makeSyntheticSpec(-64, 2.5, -28, 0.05);
+    const res = computeAutoGain(mat, { gainDb: 0, floor: 0 });
+    expect(res.gainDb).toBeGreaterThanOrEqual(-22);
+    expect(res.gainDb).toBeLessThanOrEqual(-15);
+    expect(res.floor).toBeLessThanOrEqual(5);
+    expect(mapLevel(-28, res.gainDb, res.floor)).toBeGreaterThan(0.5);
+    expect(mapLevel(-64, res.gainDb, res.floor)).toBe(0);
+  });
+
+  it('boosts faint low-SNR whale signal to clear visibility while snapping noise to 0', () => {
     const mat = makeSyntheticSpec(-102, 3, -78, 0.06);
     const res = computeAutoGain(mat, { gainDb: 0, floor: 0 });
-    expect(res.gainDb).toBeGreaterThan(40);
-    expect(res.floor).toBeGreaterThan(30);
-    // Target whale call stays vivid & dark (> 0.85)
-    expect(mapLevel(-78, res.gainDb, res.floor)).toBeGreaterThan(0.85);
-    // Median ambient noise snaps cleanly to pure background (0.0)
+    expect(res.gainDb).toBeGreaterThan(25);
+    expect(mapLevel(-78, res.gainDb, res.floor)).toBeGreaterThan(0.5);
     expect(mapLevel(-102, res.gainDb, res.floor)).toBe(0);
   });
 
   it('attenuates hot recordings and ignores DC rumble spikes', () => {
     const mat = makeSyntheticSpec(-62, 2.5, -12, 0.05, 5);
     const res = computeAutoGain(mat, { gainDb: 0, floor: 0 });
-    expect(res.gainDb).toBeLessThan(0);
-    expect(mapLevel(-12, res.gainDb, res.floor)).toBeGreaterThan(0.85);
+    expect(res.gainDb).toBeLessThan(-10);
+    expect(res.floor).toBeLessThanOrEqual(5);
+    expect(mapLevel(-12, res.gainDb, res.floor)).toBeGreaterThan(0.7);
     expect(mapLevel(-62, res.gainDb, res.floor)).toBe(0);
   });
 });

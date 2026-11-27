@@ -710,8 +710,13 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
             name: options?.name,
           };
 
-      set({ statusMessage: `Opening ${uri}...`, errorMessage: null });
-      const info = await get().engine.openCompleteAudio(sourceId, uri, recKey, openOpts);
+      set({ statusMessage: `Opening ${options?.name || uri}...`, errorMessage: null });
+      const rawInfo = await get().engine.openCompleteAudio(sourceId, uri, recKey, openOpts);
+      const preferredName = options?.name?.trim();
+      const info =
+        preferredName && preferredName.length > 0 && rawInfo.name !== preferredName
+          ? { ...rawInfo, name: preferredName }
+          : rawInfo;
       await get().openAudioInfoInWindow(info, {
         recordingKey: recKey,
         restoreState: options?.restoreSaved !== false ? (saved ?? getRecordingViewState(recKey)) : null,
@@ -796,6 +801,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
       });
     } else {
       await get().openAudioFromSource(saved.sourceId, saved.uri, {
+        name: saved.label,
         restoreSaved: true,
       });
     }
@@ -974,7 +980,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
   openUploadedFile: async (file) => {
     try {
       set({ statusMessage: `Loading ${file.name}...`, errorMessage: null });
-      const info = await get().engine.uploadAudio(file);
+      const rawInfo = await get().engine.uploadAudio(file);
+      const info = file.name && rawInfo.name !== file.name ? { ...rawInfo, name: file.name } : rawInfo;
       await get().openAudioInfoInWindow(info);
     } catch (err) {
       set({

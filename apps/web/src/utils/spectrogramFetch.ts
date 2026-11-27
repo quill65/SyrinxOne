@@ -341,15 +341,25 @@ export function computeAutoGain(
   // Target signal peak (99.6th percentile ignores isolated single-pixel clicks while capturing calls)
   const peakSignalDb = quantile(samples, 0.996);
 
-  // 1. Set Gain so target vocalization peaks land cleanly near 0.94 (rich contrast with crisp headroom)
-  const targetPeakNorm = 0.94;
-  const rawGainDb = targetPeakNorm * SPECTROGRAM_SPAN_DB + SPECTROGRAM_BASE_FLOOR_DB - peakSignalDb;
+  // 1. Anchor Gain to the background noise ceiling so noise sits naturally at ~2% (level ≈ 0.02)
+  //    instead of lifting noise high and forcing a harsh speckled Floor cutoff.
+  //    Only lift Gain further on low-SNR recordings so target peaks reach at least 0.55 clarity,
+  //    and cap so peaks stay below 0.92 (preventing over-saturation).
+  const targetNoiseNorm = 0.02;
+  const gainFromNoise =
+    targetNoiseNorm * SPECTROGRAM_SPAN_DB + SPECTROGRAM_BASE_FLOOR_DB - noiseCeilingDb;
+  const minGainForSignal =
+    0.55 * SPECTROGRAM_SPAN_DB + SPECTROGRAM_BASE_FLOOR_DB - peakSignalDb;
+  const maxGainNoClip =
+    0.92 * SPECTROGRAM_SPAN_DB + SPECTROGRAM_BASE_FLOOR_DB - peakSignalDb;
+
+  const rawGainDb = Math.min(maxGainNoClip, Math.max(minGainForSignal, gainFromNoise));
   const gainDb = Math.round(
     Math.max(SPECTROGRAM_GAIN_MIN_DB, Math.min(SPECTROGRAM_GAIN_MAX_DB, rawGainDb)),
   );
 
-  // 2. Set Floor right above the gained background noise ceiling so noise snaps cleanly to pure
-  //    background while guaranteeing at least 16% headroom below the target signal peak.
+  // 2. Place Floor gently right at the gained noise ceiling (~2% for normal/high-SNR recordings,
+  //    higher only when low-SNR gain boost lifts background noise above zero).
   const peakLevel = Math.max(
     0,
     Math.min(1, (peakSignalDb + gainDb - SPECTROGRAM_BASE_FLOOR_DB) / SPECTROGRAM_SPAN_DB),
@@ -358,8 +368,8 @@ export function computeAutoGain(
     0,
     Math.min(1, (noiseCeilingDb + gainDb - SPECTROGRAM_BASE_FLOOR_DB) / SPECTROGRAM_SPAN_DB),
   );
-  const maxSafeFloorNorm = Math.max(0, Math.min(0.85, peakLevel - 0.16));
-  const desiredFloorNorm = noiseLevel <= 0.03 ? 0 : Math.min(noiseLevel, maxSafeFloorNorm);
+  const maxSafeFloorNorm = Math.max(0, Math.min(0.75, peakLevel - 0.18));
+  const desiredFloorNorm = noiseLevel <= 0.005 ? 0 : Math.min(noiseLevel, maxSafeFloorNorm);
   const floor = Math.round(
     Math.max(SPECTROGRAM_FLOOR_MIN, Math.min(SPECTROGRAM_FLOOR_MAX, desiredFloorNorm * 100)),
   );

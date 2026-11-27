@@ -19,7 +19,8 @@ export const MDIWorkspace: React.FC = () => {
   const focusWindow = useWorkspaceStore((s) => s.focusWindow);
   const closeWindow = useWorkspaceStore((s) => s.closeWindow);
   const updateWindowDisplaySettings = useWorkspaceStore((s) => s.updateWindowDisplaySettings);
-  const autoGainWindow = useWorkspaceStore((s) => s.autoGainWindow);
+  const windowAutoGainMode = useWorkspaceStore((s) => s.windowAutoGainMode);
+  const setWindowAutoGainMode = useWorkspaceStore((s) => s.setWindowAutoGainMode);
   const openUploadedFile = useWorkspaceStore((s) => s.openUploadedFile);
   const importAnnotationsFromText = useWorkspaceStore((s) => s.importAnnotationsFromText);
   const setModalState = useWorkspaceStore((s) => s.setModalState);
@@ -145,13 +146,12 @@ export const MDIWorkspace: React.FC = () => {
             </span>
             <button
               type="button"
-              className="mobile-auto-gain-btn"
-              onClick={() =>
-                autoGainWindow(activeMobileWin.windowId, {
-                  scope: activeMobileWin.selection ? 'selection' : 'view',
-                })
-              }
-              title="Auto Gain"
+              className={`mobile-auto-gain-btn ${(windowAutoGainMode[activeMobileWin.windowId] ?? 'manual') === 'auto' ? 'btn-active' : ''}`}
+              onClick={() => {
+                const cur = windowAutoGainMode[activeMobileWin.windowId] ?? 'manual';
+                setWindowAutoGainMode(activeMobileWin.windowId, cur === 'auto' ? 'manual' : 'auto');
+              }}
+              title="Toggle Auto Gain"
             >
               <Sparkles size={12} /> Auto
             </button>

@@ -418,7 +418,8 @@ class GoogleDriveAudioDataSource(AudioDataSource):
         self.raw_input = folder_or_url
         self.api_key = api_key.strip() if api_key else None
         self.oauth_token = oauth_token.strip() if oauth_token else None
-        self.display_name = display_name or (
+        self._has_custom_display_name = bool(display_name and display_name.strip())
+        self.display_name = (display_name.strip() if display_name and display_name.strip() else None) or (
             f"Google Drive Folder ({drive_id[:8]}…)"
             if is_folder
             else f"Google Drive File ({drive_id[:8]}…)"
@@ -510,13 +511,13 @@ class GoogleDriveAudioDataSource(AudioDataSource):
 
     async def list_items(self, prefix: str = "", limit: int = 250) -> list[BrowseEntry]:
         if not self.is_folder:
-            name = f"{self.root_id}.wav"
+            name = self.display_name if self._has_custom_display_name else f"{self.root_id}.wav"
             return [
                 BrowseEntry(
                     name=name,
                     uri=f"gdrive://{self.root_id}/{name}",
                     is_dir=False,
-                    kind="audio",
+                    kind=classify_entry_kind(name) if self._has_custom_display_name else "audio",
                 )
             ]
 

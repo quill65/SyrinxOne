@@ -22,7 +22,6 @@ export const SpecSettingsPanel: React.FC = () => {
   const applySettingsToAllWindows = useWorkspaceStore((s) => s.applySettingsToAllWindows);
   const makeActiveSettingsDefault = useWorkspaceStore((s) => s.makeActiveSettingsDefault);
   const setWindowAutoGainMode = useWorkspaceStore((s) => s.setWindowAutoGainMode);
-  const autoGainWindow = useWorkspaceStore((s) => s.autoGainWindow);
   const windowAutoGainMode = useWorkspaceStore((s) => s.windowAutoGainMode);
   const setModalState = useWorkspaceStore((s) => s.setModalState);
 
@@ -107,36 +106,19 @@ export const SpecSettingsPanel: React.FC = () => {
         </div>
 
         <div className="field-group">
-          <label>Auto Gain (Alt+A)</label>
-          <div className="field-inline-row" style={{ justifyContent: 'space-between' }}>
-            <button
-              type="button"
-              className={`btn-small ${autoGainMode === 'auto' ? 'btn-active' : 'btn-primary'}`}
-              style={{ flex: 1, justifyContent: 'center' }}
-              onClick={() =>
-                autoGainWindow(activeWin.windowId, {
-                  scope: activeWin.selection ? 'selection' : 'view',
-                })
-              }
-              title="Adjust Gain & Floor to maximize target signal and minimize background noise"
-            >
-              {activeWin.selection ? 'Auto Gain (Selection)' : 'Auto Gain'}
-            </button>
-            <label
-              className="inline-check"
-              style={{ fontSize: 12, color: 'var(--text)', flexShrink: 0 }}
-              title="Run Auto Gain automatically on load, zoom & pan"
-            >
-              <input
-                type="checkbox"
-                checked={autoGainMode === 'auto'}
-                onChange={(e) =>
-                  setWindowAutoGainMode(activeWin.windowId, e.target.checked ? 'auto' : 'manual')
-                }
-              />
-              Auto
-            </label>
-          </div>
+          <button
+            type="button"
+            className={`btn-small ${autoGainMode === 'auto' ? 'btn-active' : ''}`}
+            style={{ width: '100%', justifyContent: 'space-between' }}
+            onClick={() =>
+              setWindowAutoGainMode(activeWin.windowId, autoGainMode === 'auto' ? 'manual' : 'auto')
+            }
+            aria-pressed={autoGainMode === 'auto'}
+            title="Toggle Auto Gain (Alt+A) — automatically sets Gain & Floor to emphasize signal and minimize noise"
+          >
+            <span>Auto Gain (Alt+A)</span>
+            <strong>{autoGainMode === 'auto' ? 'ON' : 'OFF'}</strong>
+          </button>
         </div>
 
         <div className="field-group">

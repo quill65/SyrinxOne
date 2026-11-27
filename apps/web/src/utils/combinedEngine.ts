@@ -373,7 +373,12 @@ export class CombinedEngineProxy implements AudioEngineClient {
           }
         : undefined;
 
-    const info = await this.inner.openAudio(sourceId, uri, openOpts);
+    const rawInfo = await this.inner.openAudio(sourceId, uri, openOpts);
+    const preferredName = options?.name?.trim();
+    const info: AudioFileInfo =
+      preferredName && preferredName.length > 0 && rawInfo.name !== preferredName
+        ? { ...rawInfo, name: preferredName }
+        : rawInfo;
     const totalDur = Math.max(0.05, info.totalDurationSec ?? info.durationSec);
     const safeMax = getSafeMaxWindowSec(info.sampleRate, info.numChannels);
 

@@ -169,6 +169,16 @@ def test_gdrive_public_embedded_folder_listing() -> None:
     assert items[0].name == "humpback_clip.wav"
     assert items[0].kind == "audio"
 
+    single = GoogleDriveAudioDataSource(
+        source_id="gd_single",
+        folder_or_url="https://drive.google.com/file/d/1SingleFile123456789/view",
+        display_name="song_sparrow_take3.wav",
+    )
+    single_items = asyncio.run(single.list_items())
+    assert len(single_items) == 1
+    assert single_items[0].name == "song_sparrow_take3.wav"
+    assert single_items[0].uri == "gdrive://1SingleFile123456789/song_sparrow_take3.wav"
+
 
 def test_remote_wav_range_window_loader() -> None:
     wav_bytes = _make_tone_wav_bytes(freq_hz=1500.0, duration_sec=4.0, sr=16000)

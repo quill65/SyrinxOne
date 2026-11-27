@@ -29,7 +29,8 @@ export const MDIChildWindow: React.FC<Props> = ({ win, file, isActive }) => {
   const updateWindowDisplaySettings = useWorkspaceStore((s) => s.updateWindowDisplaySettings);
   const updateWindowViewRange = useWorkspaceStore((s) => s.updateWindowViewRange);
   const toggleWindowLinkGroup = useWorkspaceStore((s) => s.toggleWindowLinkGroup);
-  const autoGainWindow = useWorkspaceStore((s) => s.autoGainWindow);
+  const autoGainMode = useWorkspaceStore((s) => s.windowAutoGainMode[win.windowId] ?? 'manual');
+  const setWindowAutoGainMode = useWorkspaceStore((s) => s.setWindowAutoGainMode);
 
   const actionRef = useRef<{
     kind: 'move' | 'resize';
@@ -182,12 +183,12 @@ export const MDIChildWindow: React.FC<Props> = ({ win, file, isActive }) => {
                   : win.displaySettings.gainDb.toFixed(0)}
               </span>
               <button
-                className="mdi-icon-btn"
+                className={`mdi-icon-btn ${autoGainMode === 'auto' ? 'active' : ''}`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  autoGainWindow(win.windowId, { scope: win.selection ? 'selection' : 'view' });
+                  setWindowAutoGainMode(win.windowId, autoGainMode === 'auto' ? 'manual' : 'auto');
                 }}
-                title="Auto Gain (Alt+A)"
+                title={autoGainMode === 'auto' ? 'Auto Gain: ON (Alt+A)' : 'Auto Gain: OFF (Alt+A)'}
               >
                 <Sparkles size={11} />
               </button>
