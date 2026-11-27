@@ -354,3 +354,54 @@ def test_default_app_exposes_all_builtin_discovery_providers() -> None:
     providers = [DiscoveryProviderInfo.model_validate(item) for item in resp.json()]
     ids = {p.provider_id for p in providers}
     assert {"open_catalog", "zenodo", "huggingface", "inaturalist", "xenocanto", "freesound"} <= ids
+
+
+class _DeepNestedSource(AudioDataSource):
+    kind = "huggingface"
+    anonymous = True
+    read_only = True
+    removable = True
+
+    def __init__(self, depth_to_audio: int) -> None:
+        self.source_id = f"deep_{depth_to_audio}"
+        self.display_name = "Deep Nested Archive"
+        self._depth = depth_to_audio
+        self._wav = _make_wav_bytes(sr=16000, channels=1)
+
+    async def list_items(self, prefix: str = "", limit: int = 250) -> list[BrowseEntry]:
+        level = len([p for p in prefix.strip("/").split("/") if p])
+        if level < self._depth:
+            nxt = f"{prefix.rstrip('/')}/d{level + 1}".lstrip("/")
+            return [BrowseEntry(name=f"d{level + 1}", uri=nxt, is_dir=True, kind="other")]
+        return [
+            BrowseEntry(
+                name="track.CH1.wav",
+                uri=f"{prefix.rstrip('/')}/track.CH1.wav",
+                is_dir=False,
+                size_bytes=len(self._wav),
+                kind="audio",
+            )
+        ]
+
+    async def read_bytes(self, uri: str) -> bytes:
+        return self._wav
+
+    async def read_byte_range(
+        self, uri: str, start: int, end_inclusive: int
+    ) -> tuple[bytes, int | None]:
+        return self._wav[start : end_inclusive + 1], len(self._wav)
+
+    async def write_bytes(self, uri: str, data: bytes) -> str:
+        raise PermissionError("read-only")
+
+
+def test_verify_audio_source_deep_nested_trees() -> None:
+    # 5 levels deep (like CHiME-3 without prefix) -> verified
+    res_5 = asyncio.run(verify_audio_source(_DeepNestedSource(5)))
+    assert res_5.status == "verified"
+    assert res_5.sample_rate_hz == 16000
+
+    # Deeper than 7 levels -> untested (never falsely locked out as incompatible)
+    res_9 = asyncio.run(verify_audio_source(_DeepNestedSource(9)))
+    assert res_9.status == "untested"
+

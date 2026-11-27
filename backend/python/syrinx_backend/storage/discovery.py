@@ -212,10 +212,10 @@ async def verify_audio_source(
     ]
     dir_entries = [e for e in entries if e.is_dir and e.name != ".."]
 
-    # If top level only has folders (e.g. congo8khz-pnnn/recordings/wav/ or HF nested trees), probe up to 4 levels deep
+    # If top level only has folders (e.g. congo8khz-pnnn/recordings/wav/ or HF nested trees), probe up to 7 levels deep
     depth = 0
     probe_dirs = dir_entries[:3]
-    while not audio_entries and probe_dirs and depth < 4:
+    while not audio_entries and probe_dirs and depth < 7:
         depth += 1
         next_dirs = []
         for d in probe_dirs:
@@ -247,11 +247,18 @@ async def verify_audio_source(
                 formats=exts,
                 message=f"Contains packaged archives ({', '.join(exts)}) — download & extract to open locally.",
             )
+        if probe_dirs:
+            return SourceVerificationResult(
+                status="untested",
+                streamable=False,
+                audio_file_count=0,
+                message="Deep folder hierarchy (>7 levels) — connect to browse subdirectories.",
+            )
         return SourceVerificationResult(
             status="incompatible",
             streamable=False,
             audio_file_count=0,
-            message="No streamable audio files (.wav/.flac/.ogg/.mp3) found at archive root.",
+            message="No streamable audio files (.wav/.flac/.ogg/.mp3) found in archive.",
         )
 
     formats = sorted(
@@ -470,16 +477,17 @@ class CuratedCloudCatalogProvider(DiscoveryProvider):
         },
         {
             "id": "hf_chime3_6ch",
-            "title": "CHiME-3 Multi-Channel Array Recordings (6-Channel WAV)",
-            "description": "Uncompressed 6-channel microphone array environmental WAV recordings ideal for multi-channel spectrogram stacking and spatial inspection.",
+            "title": "CHiME-3 Multi-Channel Array Recordings (6-Mic Array WAV)",
+            "description": "Uncompressed 16 kHz environmental WAV recordings from a 6-microphone tablet array (6 synchronized CH1–CH6 tracks per session) ideal for multi-channel spatial inspection.",
             "homepageUrl": "https://huggingface.co/datasets/chimechallenge/chime3-background-noise",
             "license": "CC-BY 4.0",
             "tags": ["multi-channel", "multichannel", "array", "6-channel", "microphone", "spatial", "environmental", "wav"],
             "req": {
                 "kind": "huggingface",
                 "sourceId": "hf_chime3_6ch",
-                "displayName": "CHiME-3 6-Channel Array",
+                "displayName": "CHiME-3 6-Mic Array",
                 "folderOrUrl": "chimechallenge/chime3-background-noise",
+                "prefix": "CHiME3/data/audio/16kHz/backgrounds",
                 "anonymous": True,
                 "readOnly": True,
             },
