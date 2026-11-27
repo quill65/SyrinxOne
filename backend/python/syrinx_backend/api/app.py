@@ -397,8 +397,7 @@ def create_app(
         pop_filter: bool = Query(default=False),
         colormap: ColormapName = Query(default="grayscale_bow"),
         gain_db: float = Query(default=0.0),
-        threshold_db: float = Query(default=-80.0),
-        dynamic_range_db: float = Query(default=75.0),
+        floor: float = Query(default=0.0, ge=0.0, le=95.0),
         start_sec: float | None = Query(default=None),
         end_sec: float | None = Query(default=None),
         min_freq_hz: float | None = Query(default=None),
@@ -428,8 +427,7 @@ def create_app(
             spec,
             colormap=colormap,
             gain_db=gain_db,
-            threshold_db=threshold_db,
-            dynamic_range_db=dynamic_range_db,
+            floor=floor,
         )
         return Response(content=png_bytes, media_type="image/png")
 

@@ -150,10 +150,7 @@ async def analyze_recording_with_ai(
             spec,
             colormap=req.display_settings.colormap if req.display_settings else "viridis",
             gain_db=req.display_settings.gain_db if req.display_settings else 0.0,
-            threshold_db=req.display_settings.threshold_db if req.display_settings else -80.0,
-            dynamic_range_db=(
-                req.display_settings.dynamic_range_db if req.display_settings else 75.0
-            ),
+            floor=req.display_settings.floor if req.display_settings else 0.0,
         )
         png_b64 = base64.b64encode(png_bytes).decode("ascii")
 

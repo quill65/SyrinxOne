@@ -5,6 +5,10 @@ import {
   DEFAULT_HOTKEY_BINDINGS,
   DEFAULT_SPECTROGRAM_PARAMS,
   HttpAudioEngineClient,
+  SPECTROGRAM_FLOOR_MAX,
+  SPECTROGRAM_FLOOR_MIN,
+  SPECTROGRAM_GAIN_MAX_DB,
+  SPECTROGRAM_GAIN_MIN_DB,
   type AnnotationFilter,
   type AnnotationFormat,
   type AnnotationRecord,
@@ -27,7 +31,7 @@ import type { GoogleUserProfile } from '../auth/googleAuth';
 import { applyMdiLayout, type CanvasBounds } from '../utils/mdiLayout';
 import {
   MAX_WEBGL_TIME_BINS,
-  computeNormalizedGainDb,
+  computeAutoGain,
   fetchSpectrogramAdaptive,
   formatDurationCompact,
   getSafeMaxWindowSec,
@@ -175,8 +179,26 @@ function loadSavedHotkeys(): HotkeyBinding[] {
 function sanitizeDisplaySettings(raw?: Partial<DisplaySettings>): DisplaySettings {
   const merged = { ...DEFAULT_DISPLAY_SETTINGS, ...(raw ?? {}) };
   const rawRows = Number(merged.splitTimeRows);
+  const rawGain = Number(merged.gainDb);
+  const rawFloor = Number(merged.floor);
   return {
-    ...merged,
+    colormap: merged.colormap,
+    gainDb: Number.isFinite(rawGain)
+      ? Math.max(SPECTROGRAM_GAIN_MIN_DB, Math.min(SPECTROGRAM_GAIN_MAX_DB, Math.round(rawGain)))
+      : DEFAULT_DISPLAY_SETTINGS.gainDb,
+    floor: Number.isFinite(rawFloor)
+      ? Math.max(SPECTROGRAM_FLOOR_MIN, Math.min(SPECTROGRAM_FLOOR_MAX, Math.round(rawFloor)))
+      : DEFAULT_DISPLAY_SETTINGS.floor,
+    renderMode: merged.renderMode,
+    timeScaleMode: merged.timeScaleMode,
+    msPerPixel: merged.msPerPixel,
+    showWaveform: Boolean(merged.showWaveform),
+    showAxes: Boolean(merged.showAxes),
+    showGrid: Boolean(merged.showGrid),
+    showAnnotations: Boolean(merged.showAnnotations),
+    showCursors: Boolean(merged.showCursors),
+    lockSettings: Boolean(merged.lockSettings),
+    interpolation: merged.interpolation,
     splitTimeRows: Number.isFinite(rawRows) ? Math.max(1, Math.min(10, Math.round(rawRows))) : 1,
     stackAllChannels: Boolean(merged.stackAllChannels),
   };
@@ -375,7 +397,7 @@ export interface WorkspaceStore {
   updateWindowSpecParams: (windowId: string, patch: Partial<SpectrogramParams>) => Promise<void>;
   updateWindowDisplaySettings: (windowId: string, patch: Partial<DisplaySettings>) => void;
   setWindowAutoGainMode: (windowId: string, mode: AutoGainMode) => void;
-  normalizeWindowGain: (
+  autoGainWindow: (
     windowId: string,
     options?: {
       scope?: 'full' | 'view' | 'selection';
@@ -387,6 +409,7 @@ export interface WorkspaceStore {
   makeActiveSettingsDefault: (sourceWindowId: string) => void;
   toggleTimeScaleMode: (windowId: string) => void;
   nudgeWindowGain: (windowId: string, deltaDb: number) => void;
+  nudgeWindowFloor: (windowId: string, deltaPct: number) => void;
   toggleAllCursors: () => void;
   toggleWindowLinkGroup: (windowId: string) => void;
   toggleAllTitlebars: () => void;
@@ -1122,7 +1145,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
     if (missing.length === 0) {
       const mode = normalizeAutoGainMode(state.windowAutoGainMode[windowId]);
       if (mode === 'auto' && primaryMatrix) {
-        get().normalizeWindowGain(windowId, {
+        get().autoGainWindow(windowId, {
           scope: 'view',
           matrix: primaryMatrix,
           silent: true,
@@ -1179,7 +1202,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
         fetched[0]?.mat;
       const mode = normalizeAutoGainMode(get().windowAutoGainMode[windowId]);
       if (mode === 'auto' && normMat) {
-        get().normalizeWindowGain(windowId, {
+        get().autoGainWindow(windowId, {
           scope: 'view',
           matrix: normMat,
           silent: true,
@@ -1398,10 +1421,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
   },
 
   updateWindowDisplaySettings: (windowId, patch) => {
-    const manualLevelEdit =
-      patch.gainDb !== undefined ||
-      patch.thresholdDb !== undefined ||
-      patch.dynamicRangeDb !== undefined;
+    const manualLevelEdit = patch.gainDb !== undefined || patch.floor !== undefined;
     const cleanPatch = { ...patch };
     if (cleanPatch.splitTimeRows !== undefined) {
       cleanPatch.splitTimeRows = Math.max(1, Math.min(10, Math.round(cleanPatch.splitTimeRows)));
@@ -1450,15 +1470,15 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
       windowAutoGainMode: { ...s.windowAutoGainMode, [windowId]: cleanMode },
     }));
     if (cleanMode === 'manual') {
-      set({ statusMessage: 'Auto-normalization turned off (Manual levels)' });
+      set({ statusMessage: 'Auto Gain turned off (Manual Gain & Floor)' });
       schedulePersistView(get, windowId);
       return;
     }
-    get().normalizeWindowGain(windowId, { scope: 'view' });
+    get().autoGainWindow(windowId, { scope: 'view' });
     schedulePersistView(get, windowId);
   },
 
-  normalizeWindowGain: (windowId, options) => {
+  autoGainWindow: (windowId, options) => {
     const state = get();
     const win = state.windows.find((w) => w.windowId === windowId);
     if (!win) return;
@@ -1466,7 +1486,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
       options?.matrix ?? getCachedSpectrogram(state.spectrogramCache, win.fileId, win.specParams);
     if (!matrix) {
       if (!options?.silent) {
-        set({ statusMessage: 'Spectrogram data still loading — cannot normalize yet' });
+        set({ statusMessage: 'Spectrogram data still loading — cannot run Auto Gain yet' });
       }
       return;
     }
@@ -1484,11 +1504,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
             }
           : win.viewRange;
 
-    const result = computeNormalizedGainDb(matrix, win.displaySettings, region);
+    const result = computeAutoGain(matrix, win.displaySettings, region);
     const changed =
-      result.thresholdDb !== win.displaySettings.thresholdDb ||
-      result.dynamicRangeDb !== win.displaySettings.dynamicRangeDb ||
-      result.gainDb !== win.displaySettings.gainDb;
+      result.gainDb !== win.displaySettings.gainDb || result.floor !== win.displaySettings.floor;
     if (!changed && options?.silent) return;
 
     const signGain = result.gainDb >= 0 ? `+${result.gainDb}` : `${result.gainDb}`;
@@ -1500,9 +1518,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
                   ...w,
                   displaySettings: {
                     ...w.displaySettings,
-                    thresholdDb: result.thresholdDb,
-                    dynamicRangeDb: result.dynamicRangeDb,
                     gainDb: result.gainDb,
+                    floor: result.floor,
                   },
                 }
               : w,
@@ -1510,7 +1527,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
         : s.windows,
       statusMessage: options?.silent
         ? s.statusMessage
-        : `Normalized: Floor ${result.thresholdDb} dB · Range ${result.dynamicRangeDb} dB · Gain ${signGain} dB (signal ${result.floorDb.toFixed(1)} to ${result.peakDb.toFixed(1)} dB)`,
+        : `Auto Gain: Gain ${signGain} dB · Floor ${result.floor}% (noise ${result.noiseDb.toFixed(1)} dB, peak ${result.peakDb.toFixed(1)} dB)`,
     }));
     schedulePersistView(get, windowId);
   },
@@ -1606,9 +1623,24 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => {
   nudgeWindowGain: (windowId, deltaDb) => {
     const win = get().windows.find((w) => w.windowId === windowId);
     if (!win) return;
-    const next = Math.max(-40, Math.min(60, win.displaySettings.gainDb + deltaDb));
+    const next = Math.max(
+      SPECTROGRAM_GAIN_MIN_DB,
+      Math.min(SPECTROGRAM_GAIN_MAX_DB, Math.round(win.displaySettings.gainDb + deltaDb)),
+    );
     get().updateWindowDisplaySettings(windowId, { gainDb: next });
-    set({ statusMessage: `Spectrogram gain: ${next.toFixed(0)} dB` });
+    const sign = next >= 0 ? `+${next}` : `${next}`;
+    set({ statusMessage: `Gain: ${sign} dB` });
+  },
+
+  nudgeWindowFloor: (windowId, deltaPct) => {
+    const win = get().windows.find((w) => w.windowId === windowId);
+    if (!win) return;
+    const next = Math.max(
+      SPECTROGRAM_FLOOR_MIN,
+      Math.min(SPECTROGRAM_FLOOR_MAX, Math.round(win.displaySettings.floor + deltaPct)),
+    );
+    get().updateWindowDisplaySettings(windowId, { floor: next });
+    set({ statusMessage: `Floor: ${next}%` });
   },
 
   toggleAllCursors: () =>

@@ -70,7 +70,13 @@ def test_server_bitmap_png_fallback_renders_valid_image() -> None:
     sig = _make_sine(1500.0, sr=16000, duration_sec=0.4)
     spec = compute_spectrogram(sig, sample_rate=16000, fft_size=256, hop_size=64)
     for cmap in ("grayscale_bow", "grayscale_wob", "viridis", "magma", "inferno", "turbo"):
-        png = render_spectrogram_png(spec, colormap=cmap)  # type: ignore[arg-type]
+        png = render_spectrogram_png(spec, colormap=cmap, gain_db=6.0, floor=25.0)  # type: ignore[arg-type]
         img = Image.open(io.BytesIO(png))
         assert img.format == "PNG"
         assert img.size == (spec.matrix.shape[0], spec.matrix.shape[1])
+
+    # Verify high Floor snaps quiet bins to pure white in grayscale_bow
+    png_clean = render_spectrogram_png(spec, colormap="grayscale_bow", gain_db=0.0, floor=60.0)
+    arr = np.asarray(Image.open(io.BytesIO(png_clean)))
+    assert int(np.max(arr)) == 255
+    assert float(np.mean(arr == 255)) > 0.7

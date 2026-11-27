@@ -457,8 +457,7 @@ export class HttpAudioEngineClient implements AudioEngineClient {
       pop_filter: String(params.popFilter),
       colormap: display.colormap,
       gain_db: String(display.gainDb),
-      threshold_db: String(display.thresholdDb),
-      dynamic_range_db: String(display.dynamicRangeDb),
+      floor: String(display.floor),
     });
     if (range?.startSec !== undefined) q.set('start_sec', String(range.startSec));
     if (range?.endSec !== undefined) q.set('end_sec', String(range.endSec));

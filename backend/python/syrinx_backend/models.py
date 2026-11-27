@@ -259,8 +259,7 @@ class AiSpecParams(CamelModel):
 class AiDisplaySettings(CamelModel):
     colormap: ColormapName = "grayscale_bow"
     gain_db: float = 0.0
-    threshold_db: float = -80.0
-    dynamic_range_db: float = 75.0
+    floor: float = 0.0
 
 
 class SuggestedDetectParams(CamelModel):

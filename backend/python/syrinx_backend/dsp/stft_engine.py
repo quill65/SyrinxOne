@@ -180,21 +180,28 @@ def _build_lut(colormap: ColormapName) -> np.ndarray:
     return np.stack([r, g, b], axis=-1).clip(0, 255).astype(np.uint8)
 
 
+SPECTROGRAM_BASE_FLOOR_DB = -80.0
+SPECTROGRAM_SPAN_DB = 60.0
+
+
 def render_spectrogram_png(
     spec: SpectrogramResult,
     colormap: ColormapName = "grayscale_bow",
     gain_db: float = 0.0,
-    threshold_db: float = -80.0,
-    dynamic_range_db: float = 75.0,
+    floor: float = 0.0,
 ) -> bytes:
-    """Server-side bitmap fallback renderer (SpecDIB equivalent) returning PNG bytes."""
+    """Server-side bitmap fallback renderer returning PNG bytes with Gain + Floor mapping."""
     mat = spec.matrix  # (T, F), low freq at 0
     if mat.size == 0:
         img = Image.new("RGB", (1, 1), (255, 255, 255))
     else:
-        dyn = max(1.0, float(dynamic_range_db))
-        norm = (mat + float(gain_db) - float(threshold_db)) / dyn
-        norm = np.clip(norm, 0.0, 1.0)
+        level = np.clip(
+            (mat + float(gain_db) - SPECTROGRAM_BASE_FLOOR_DB) / SPECTROGRAM_SPAN_DB,
+            0.0,
+            1.0,
+        )
+        floor_norm = max(0.0, min(0.95, float(floor) / 100.0))
+        norm = np.where(level < floor_norm, 0.0, level) if floor_norm > 0.0 else level
         idx = np.round(norm * 255.0).astype(np.uint8)
         lut = _build_lut(colormap)
         # Flip frequency axis so high frequency is at the top (row 0) and time runs left->right

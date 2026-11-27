@@ -1,6 +1,11 @@
 import React, { useRef } from 'react';
-import { Link2, Maximize2, Minimize2, Minus, Play, Square, X, ZoomIn } from 'lucide-react';
-import type { AudioFileInfo, MDIWindowState } from '@syrinxone/shared';
+import { Link2, Maximize2, Minimize2, Minus, Play, Sparkles, Square, X, ZoomIn } from 'lucide-react';
+import {
+  SPECTROGRAM_GAIN_MAX_DB,
+  SPECTROGRAM_GAIN_MIN_DB,
+  type AudioFileInfo,
+  type MDIWindowState,
+} from '@syrinxone/shared';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { audioPlayer } from '../../audio/WebAudioPlayer';
 import { formatDurationCompact } from '../../utils/spectrogramFetch';
@@ -24,6 +29,7 @@ export const MDIChildWindow: React.FC<Props> = ({ win, file, isActive }) => {
   const updateWindowDisplaySettings = useWorkspaceStore((s) => s.updateWindowDisplaySettings);
   const updateWindowViewRange = useWorkspaceStore((s) => s.updateWindowViewRange);
   const toggleWindowLinkGroup = useWorkspaceStore((s) => s.toggleWindowLinkGroup);
+  const autoGainWindow = useWorkspaceStore((s) => s.autoGainWindow);
 
   const actionRef = useRef<{
     kind: 'move' | 'resize';
@@ -152,6 +158,41 @@ export const MDIChildWindow: React.FC<Props> = ({ win, file, isActive }) => {
           </span>
 
           <div className="mdi-titlebar-actions" onMouseDown={(e) => e.stopPropagation()}>
+            <div
+              className="mdi-gain-control"
+              title="Spectrogram Gain (Alt+↑ darker/brighter, Alt+↓ lighter)"
+              onDoubleClick={(e) => e.stopPropagation()}
+            >
+              <span className="mdi-gain-label">Gain</span>
+              <input
+                type="range"
+                className="mdi-gain-slider"
+                min={SPECTROGRAM_GAIN_MIN_DB}
+                max={SPECTROGRAM_GAIN_MAX_DB}
+                step={1}
+                value={win.displaySettings.gainDb}
+                onChange={(e) =>
+                  updateWindowDisplaySettings(win.windowId, { gainDb: Number(e.target.value) })
+                }
+                aria-label="Spectrogram Gain"
+              />
+              <span className="mdi-gain-val">
+                {win.displaySettings.gainDb >= 0
+                  ? `+${win.displaySettings.gainDb.toFixed(0)}`
+                  : win.displaySettings.gainDb.toFixed(0)}
+              </span>
+              <button
+                className="mdi-icon-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  autoGainWindow(win.windowId, { scope: win.selection ? 'selection' : 'view' });
+                }}
+                title="Auto Gain (Alt+A)"
+              >
+                <Sparkles size={11} />
+              </button>
+            </div>
+
             {file.numChannels > 1 && (
               <select
                 className="mdi-chan-select"
