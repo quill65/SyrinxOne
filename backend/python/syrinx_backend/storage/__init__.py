@@ -1,9 +1,11 @@
 """Pluggable data source adapters for local disk and heterogeneous cloud backends."""
 
 from .archive_adapters import (
+    FigshareAudioDataSource,
     FreesoundAudioDataSource,
     HuggingFaceAudioDataSource,
     INaturalistAudioDataSource,
+    RemoteArchiveAudioDataSource,
     XenoCantoAudioDataSource,
     ZenodoAudioDataSource,
 )
@@ -31,7 +33,9 @@ __all__ = [
     "GCSAudioDataSource",
     "HttpUrlAudioDataSource",
     "ZenodoAudioDataSource",
+    "FigshareAudioDataSource",
     "HuggingFaceAudioDataSource",
+    "RemoteArchiveAudioDataSource",
     "INaturalistAudioDataSource",
     "XenoCantoAudioDataSource",
     "FreesoundAudioDataSource",

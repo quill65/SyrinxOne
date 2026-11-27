@@ -79,43 +79,8 @@ def _build_default_registry() -> SourceRegistry:
             )
         )
 
-    # Built-in public bioacoustic archives (anonymous HTTPS read, zero credentials required)
-    registry.register(
-        S3AudioDataSource(
-            source_id="mbari_16khz",
-            bucket="pacific-sound-16khz",
-            region="us-west-2",
-            display_name="MBARI Pacific Ocean Sound (16 kHz, AWS)",
-            description="MBARI Monterey Bay MARS cabled hydrophone decimated 16 kHz recordings (AWS Open Data)",
-            anonymous=True,
-            read_only=True,
-            removable=False,
-        )
-    )
-    registry.register(
-        S3AudioDataSource(
-            source_id="mbari_2khz",
-            bucket="pacific-sound-2khz",
-            region="us-west-2",
-            display_name="MBARI Pacific Ocean Sound (2 kHz Whales, AWS)",
-            description="MBARI Monterey Bay 2 kHz low-frequency archive (blue/fin/humpback whales)",
-            anonymous=True,
-            read_only=True,
-            removable=False,
-        )
-    )
-    registry.register(
-        GCSAudioDataSource(
-            source_id="noaa_ncei",
-            bucket="noaa-passive-bioacoustic",
-            display_name="NOAA NCEI Passive Acoustic Archive (GCS)",
-            description="NOAA National Centers for Environmental Information Passive Acoustic Data Archive (SanctSound, SoundCoop)",
-            anonymous=True,
-            read_only=True,
-            removable=False,
-        )
-    )
-
+    # Generic transport adapters only — public archives are discovered via Search
+    # and remembered as user-selected recent sources rather than hardcoded permanently.
     s3_bucket = os.environ.get("SYRINX_S3_BUCKET")
     if s3_bucket:
         registry.register(

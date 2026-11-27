@@ -17,9 +17,11 @@ from syrinx_backend.models import (
     SourceVerificationResult,
 )
 from syrinx_backend.storage.archive_adapters import (
+    FigshareAudioDataSource,
     FreesoundAudioDataSource,
     HuggingFaceAudioDataSource,
     INaturalistAudioDataSource,
+    RemoteArchiveAudioDataSource,
     XenoCantoAudioDataSource,
     ZenodoAudioDataSource,
 )
@@ -265,6 +267,22 @@ def test_build_source_from_request_all_archive_kinds() -> None:
     assert isinstance(fs, FreesoundAudioDataSource)
     assert fs.api_key == "fs_test_key"
 
+    fg = build_source_from_request(
+        CreateSourceRequest(kind="figshare", folder_or_url="https://figshare.com/articles/dataset/foo/1234567")
+    )
+    assert isinstance(fg, FigshareAudioDataSource)
+    assert fg.article_id == "1234567"
+
+    ar = build_source_from_request(
+        CreateSourceRequest(
+            kind="archive",
+            folder_or_url="https://example.org/array_dataset.tar",
+            params={"format": "tar"},
+        )
+    )
+    assert isinstance(ar, RemoteArchiveAudioDataSource)
+    assert ar.archive_format == "tar"
+
 
 def test_verify_audio_source_states() -> None:
     # 1. Nested directory with 4-channel 48 kHz WAV -> verified with WAV header metadata
@@ -353,7 +371,7 @@ def test_default_app_exposes_all_builtin_discovery_providers() -> None:
     assert resp.status_code == 200
     providers = [DiscoveryProviderInfo.model_validate(item) for item in resp.json()]
     ids = {p.provider_id for p in providers}
-    assert {"open_catalog", "zenodo", "huggingface", "inaturalist", "xenocanto", "freesound"} <= ids
+    assert {"open_catalog", "zenodo", "figshare", "huggingface", "inaturalist", "xenocanto", "freesound"} <= ids
 
 
 class _DeepNestedSource(AudioDataSource):

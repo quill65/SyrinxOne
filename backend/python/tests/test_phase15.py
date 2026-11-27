@@ -41,10 +41,10 @@ def test_default_registry_includes_mbari_and_noaa_archives() -> None:
     sources = resp.json()
     ids = {s["sourceId"] for s in sources}
     assert "local" in ids
-    assert "mbari_16khz" in ids
-    assert "mbari_2khz" in ids
-    assert "noaa_ncei" in ids
     assert "http" in ids
+    # Hardcoded permanent archives are no longer forced into the default source list
+    assert "mbari_16khz" not in ids
+    assert "noaa_ncei" not in ids
 
 
 def test_cloud_safe_mode_disables_local_fs_source() -> None:
@@ -55,8 +55,6 @@ def test_cloud_safe_mode_disables_local_fs_source() -> None:
     assert resp.status_code == 200
     ids = {s["sourceId"] for s in resp.json()}
     assert "local" not in ids
-    assert "mbari_16khz" in ids
-    assert "noaa_ncei" in ids
     assert "http" in ids
 
 
@@ -95,10 +93,10 @@ def test_runtime_source_create_and_delete() -> None:
     assert gd_info["kind"] == "gdrive"
     assert gd_info["rootPath"] == "1AbCdEfGhIjKlMnOpQrStUvWxYz"
 
-    # Delete removable source succeeds; built-in source is protected
+    # Delete removable source succeeds; built-in transport source is protected
     del_resp = client.delete(f"/api/sources/{sid}")
     assert del_resp.status_code == 200
-    assert client.delete("/api/sources/noaa_ncei").status_code == 403
+    assert client.delete("/api/sources/local").status_code == 403
 
 
 def test_parse_google_drive_urls() -> None:

@@ -19,9 +19,11 @@ from syrinx_backend.models import (
     SourceVerificationResult,
 )
 from syrinx_backend.storage.archive_adapters import (
+    FigshareAudioDataSource,
     FreesoundAudioDataSource,
     HuggingFaceAudioDataSource,
     INaturalistAudioDataSource,
+    RemoteArchiveAudioDataSource,
     XenoCantoAudioDataSource,
     ZenodoAudioDataSource,
 )
@@ -122,6 +124,31 @@ def build_source_from_request(req: CreateSourceRequest) -> AudioDataSource:
             removable=True,
         )
 
+    if kind == "figshare":
+        art_ref = str(req.folder_or_url or req.bucket or params.get("articleId") or "").strip()
+        if not art_ref:
+            raise ValueError("Figshare source requires an article ID or Figshare URL")
+        sid = req.source_id or slugify_source_id(req.display_name or art_ref, "figshare")
+        return FigshareAudioDataSource(
+            source_id=sid,
+            article_id=art_ref,
+            display_name=req.display_name,
+            removable=True,
+        )
+
+    if kind == "archive":
+        arch_url = str(req.folder_or_url or params.get("url") or "").strip()
+        if not arch_url:
+            raise ValueError("Remote archive source requires a .zip or .tar URL")
+        sid = req.source_id or slugify_source_id(req.display_name or arch_url[-24:], "archive")
+        return RemoteArchiveAudioDataSource(
+            source_id=sid,
+            archive_url=arch_url,
+            archive_format=str(params.get("format") or "auto"),
+            display_name=req.display_name,
+            removable=True,
+        )
+
     if kind == "huggingface":
         repo_ref = str(req.folder_or_url or req.bucket or params.get("repoId") or "").strip()
         if not repo_ref:
@@ -212,15 +239,36 @@ async def verify_audio_source(
     ]
     dir_entries = [e for e in entries if e.is_dir and e.name != ".."]
 
-    # If top level only has folders (e.g. congo8khz-pnnn/recordings/wav/ or HF nested trees), probe up to 7 levels deep
+    _SKIP_PROBE_DIRS = {"..", "__pycache__", "__macosx", ".git", "node_modules", ".ipynb_checkpoints"}
+
+    # Prioritize likely audio-holding subfolders when probing nested directory trees
+    def _rank_probe_dir(entry_name: str, entry_uri: str = "") -> int:
+        n = entry_name.lower()
+        u = entry_uri.lower()
+        if any(k in n for k in ("audio", "wav", "sound", "record", "background", "16k", "48k")):
+            return 0
+        if n == "data" or "/data/" in u:
+            return 1
+        if n.endswith(".zip"):
+            return 1
+        return 2
+
+    # If top level only has folders (e.g. congo8khz-pnnn/recordings/wav/, Zenodo ZIPs, or HF nested trees), probe up to 7 levels deep
     depth = 0
-    probe_dirs = dir_entries[:3]
+    had_dir_timeout = False
+    probe_dirs = sorted(
+        [e for e in dir_entries if e.name.lower() not in _SKIP_PROBE_DIRS],
+        key=lambda e: (_rank_probe_dir(e.name, e.uri), e.name.lower()),
+    )[:8]
     while not audio_entries and probe_dirs and depth < 7:
         depth += 1
         next_dirs = []
         for d in probe_dirs:
             try:
                 sub = await asyncio.wait_for(source.list_items(d.uri, limit=40), timeout=timeout_sec)
+            except (TimeoutError, httpx.TimeoutException):
+                had_dir_timeout = True
+                continue
             except Exception:
                 continue
             audio_entries.extend([e for e in sub if not e.is_dir and e.kind == "audio"])
@@ -232,10 +280,13 @@ async def verify_audio_source(
                     and Path(e.name).suffix.lower() in {".zip", ".tar", ".gz", ".tgz", ".7z", ".parquet"}
                 ]
             )
-            next_dirs.extend([e for e in sub if e.is_dir and e.name != ".."])
+            next_dirs.extend([e for e in sub if e.is_dir and e.name.lower() not in _SKIP_PROBE_DIRS])
             if audio_entries:
                 break
-        probe_dirs = next_dirs[:3]
+        probe_dirs = sorted(
+            next_dirs,
+            key=lambda e: (_rank_probe_dir(e.name, e.uri), e.name.lower()),
+        )[:8]
 
     if not audio_entries:
         if zip_entries:
@@ -247,12 +298,16 @@ async def verify_audio_source(
                 formats=exts,
                 message=f"Contains packaged archives ({', '.join(exts)}) — download & extract to open locally.",
             )
-        if probe_dirs:
+        if probe_dirs or had_dir_timeout:
             return SourceVerificationResult(
                 status="untested",
                 streamable=False,
                 audio_file_count=0,
-                message="Deep folder hierarchy (>7 levels) — connect to browse subdirectories.",
+                message=(
+                    "Remote subfolder listing timed out — connect to browse directly."
+                    if had_dir_timeout
+                    else "Deep folder hierarchy (>7 levels) — connect to browse subdirectories."
+                ),
             )
         return SourceVerificationResult(
             status="incompatible",
@@ -544,6 +599,171 @@ class CuratedCloudCatalogProvider(DiscoveryProvider):
             },
         },
         {
+            "id": "opensoundscape_loc_array",
+            "title": "OpenSoundscape 9-Mic Acoustic Localization Array (Tutorial)",
+            "description": "Lightweight 9-receiver synchronized mono WAV array with UTM receiver coordinates (aru_coords.csv) and pre-labeled detections (detections.csv) for map pins, multi-channel alignment, and TDOA triangulation.",
+            "homepageUrl": "https://opensoundscape.org/en/latest/tutorials/acoustic_localization.html",
+            "license": "MIT / Open",
+            "tags": [
+                "distributed",
+                "microphone",
+                "array",
+                "localization",
+                "tdoa",
+                "opensoundscape",
+                "multi-channel",
+                "multichannel",
+                "terrestrial",
+                "bird",
+                "wav",
+            ],
+            "req": {
+                "kind": "archive",
+                "sourceId": "opensoundscape_loc_9mic",
+                "displayName": "OpenSoundscape 9-Mic Localization Array",
+                "folderOrUrl": "https://drive.google.com/uc?export=download&id=1M4yKM8obqiY0FU2qEriINBDSWtQGqN8E",
+                "params": {"format": "tar"},
+                "anonymous": True,
+                "readOnly": True,
+            },
+        },
+        {
+            "id": "demand_16ch_zenodo",
+            "title": "DEMAND 16-Channel Synchronized Microphone Array (Zenodo)",
+            "description": "16-channel synchronized recordings (16 kHz & 48 kHz, ch01–ch16 WAVs inside browsable ZIPs including NFIELD & NPARK natural outdoor scenes) with 5–21.8 cm compact array geometry (DEMAND.pdf).",
+            "homepageUrl": "https://zenodo.org/records/1227121",
+            "license": "CC-BY-SA 3.0",
+            "tags": [
+                "distributed",
+                "microphone",
+                "array",
+                "demand",
+                "16-channel",
+                "multi-channel",
+                "multichannel",
+                "localization",
+                "tdoa",
+                "outdoor",
+                "terrestrial",
+                "zenodo",
+                "wav",
+            ],
+            "req": {
+                "kind": "zenodo",
+                "sourceId": "zenodo_demand_16ch",
+                "displayName": "DEMAND 16-Ch Array (Zenodo)",
+                "folderOrUrl": "1227121",
+                "anonymous": True,
+                "readOnly": True,
+            },
+        },
+        {
+            "id": "demand_16ch_hf",
+            "title": "DEMAND 16-Channel Streaming Mirror (Hugging Face)",
+            "description": "Direct streaming Hugging Face Datasets Server mirror of DEMAND (16k and 48k splits) — browse and stream individual channel clips without downloading environment ZIPs.",
+            "homepageUrl": "https://huggingface.co/datasets/philgzl/demand",
+            "license": "CC-BY-SA 3.0",
+            "tags": [
+                "distributed",
+                "microphone",
+                "array",
+                "demand",
+                "16-channel",
+                "multi-channel",
+                "multichannel",
+                "streaming",
+                "huggingface",
+            ],
+            "req": {
+                "kind": "huggingface",
+                "sourceId": "hf_demand_streaming",
+                "displayName": "DEMAND Streaming (Hugging Face)",
+                "folderOrUrl": "philgzl/demand",
+                "anonymous": True,
+                "readOnly": True,
+            },
+        },
+        {
+            "id": "audiomoth_61_grid_zenodo",
+            "title": "61-Recorder GPS-AudioMoth Forest Localization Archive (Zenodo)",
+            "description": "Communications Biology (s42003-026-09949-5) loudspeaker validation & localization archive from a 61-AudioMoth forest grid (6.75 GB Remote-ZIP browsable via HTTP Range without full download).",
+            "homepageUrl": "https://zenodo.org/records/18500091",
+            "license": "CC-BY 4.0",
+            "tags": [
+                "distributed",
+                "microphone",
+                "array",
+                "audiomoth",
+                "gps",
+                "forest",
+                "grid",
+                "localization",
+                "tdoa",
+                "opensoundscape",
+                "terrestrial",
+                "bird",
+                "zenodo",
+            ],
+            "req": {
+                "kind": "zenodo",
+                "sourceId": "zenodo_audiomoth_61grid",
+                "displayName": "61-AudioMoth Localization Archive",
+                "folderOrUrl": "18500091",
+                "anonymous": True,
+                "readOnly": True,
+            },
+        },
+        {
+            "id": "mbari_16khz",
+            "title": "MBARI Pacific Ocean Sound (16 kHz, AWS)",
+            "description": "MBARI Monterey Bay MARS cabled hydrophone decimated 16 kHz recordings (AWS Open Data, 2015–present).",
+            "homepageUrl": "https://docs.mbari.org/pacific-sound/",
+            "license": "CC-BY 4.0",
+            "tags": ["mbari", "ocean", "marine", "whale", "hydrophone", "16khz", "pacific", "s3"],
+            "req": {
+                "kind": "s3",
+                "sourceId": "mbari_16khz",
+                "displayName": "MBARI Pacific Ocean Sound (16 kHz)",
+                "bucket": "pacific-sound-16khz",
+                "region": "us-west-2",
+                "anonymous": True,
+                "readOnly": True,
+            },
+        },
+        {
+            "id": "mbari_2khz",
+            "title": "MBARI Pacific Ocean Sound (2 kHz Whales, AWS)",
+            "description": "MBARI Monterey Bay 2 kHz low-frequency archive optimized for blue, fin, and humpback whale calls.",
+            "homepageUrl": "https://docs.mbari.org/pacific-sound/",
+            "license": "CC-BY 4.0",
+            "tags": ["mbari", "ocean", "marine", "whale", "blue", "fin", "hydrophone", "2khz", "s3"],
+            "req": {
+                "kind": "s3",
+                "sourceId": "mbari_2khz",
+                "displayName": "MBARI Pacific Ocean Sound (2 kHz)",
+                "bucket": "pacific-sound-2khz",
+                "region": "us-west-2",
+                "anonymous": True,
+                "readOnly": True,
+            },
+        },
+        {
+            "id": "noaa_ncei",
+            "title": "NOAA NCEI Passive Acoustic Data Archive (GCS)",
+            "description": "NOAA National Centers for Environmental Information Passive Acoustic Data Archive (SanctSound, SoundCoop, marine sanctuaries).",
+            "homepageUrl": "https://www.ncei.noaa.gov/products/passive-acoustic-data",
+            "license": "Public Domain",
+            "tags": ["noaa", "ncei", "sanctsound", "marine", "ocean", "whale", "hydrophone", "gcs"],
+            "req": {
+                "kind": "gcs",
+                "sourceId": "noaa_ncei",
+                "displayName": "NOAA NCEI Passive Acoustic Archive",
+                "bucket": "noaa-passive-bioacoustic",
+                "anonymous": True,
+                "readOnly": True,
+            },
+        },
+        {
             "id": "noaa_sanctsound",
             "title": "NOAA NCEI SanctSound Sanctuary Soundscapes (GCS)",
             "description": "Multi-site U.S. National Marine Sanctuary passive acoustic recordings (whales, fish choruses, snapping shrimp, ocean weather).",
@@ -657,9 +877,13 @@ class ZenodoDiscoveryProvider(DiscoveryProvider):
             ]
             zip_files = [
                 f for f in files
-                if Path(str(f.get("key") or "")).suffix.lower() in {".zip", ".tar", ".gz", ".tgz", ".7z"}
+                if Path(str(f.get("key") or "")).suffix.lower() == ".zip"
             ]
-            if not audio_files and not zip_files:
+            other_archive_files = [
+                f for f in files
+                if Path(str(f.get("key") or "")).suffix.lower() in {".tar", ".gz", ".tgz", ".7z"}
+            ]
+            if not audio_files and not zip_files and not other_archive_files:
                 continue
 
             title = str(meta.get("title") or f"Zenodo {rec_id}").strip()
@@ -680,13 +904,23 @@ class ZenodoDiscoveryProvider(DiscoveryProvider):
                     sample_file_name=str(audio_files[0].get("key") or ""),
                     message=f"{len(audio_files)} streamable files ({', '.join(fmts[:3])})",
                 )
+            elif zip_files:
+                # Zenodo ZIPs are directly browsable via HTTP Range central directory!
+                pre_ver = SourceVerificationResult(
+                    status="untested",
+                    streamable=True,
+                    audio_file_count=0,
+                    formats=["zip"],
+                    sample_file_name=str(zip_files[0].get("key") or ""),
+                    message=f"{len(zip_files)} remote-browsable ZIP archive(s)",
+                )
             else:
                 pre_ver = SourceVerificationResult(
                     status="zipped_only",
                     streamable=False,
                     audio_file_count=0,
-                    formats=["zip"],
-                    message="Packaged as downloadable archive (.zip/.tar) — open link to download & extract.",
+                    formats=["tar"],
+                    message="Packaged as downloadable .tar/.7z archive — open link to download & extract.",
                 )
 
             candidates.append(
@@ -1079,6 +1313,112 @@ class FreesoundDiscoveryProvider(DiscoveryProvider):
         ]
 
 
+class FigshareDiscoveryProvider(DiscoveryProvider):
+    """Live search across Figshare open scientific datasets via REST API v2 (zero API key)."""
+
+    provider_id = "figshare"
+    display_name = "Figshare Open Datasets"
+    description = "Open scientific datasets on Figshare (audio WAVs, array coordinates, browsable ZIPs)"
+    auth_required = False
+    auth_kind = "none"
+
+    async def search(
+        self,
+        prompt: str,
+        terms: list[str],
+        api_key: str | None,
+        limit: int,
+    ) -> list[DiscoveredSourceCandidate]:
+        query_terms = " ".join(terms[:5])
+        if not any(w in query_terms.lower() for w in ("audio", "acoustic", "bioacoustic", "sound", "microphone")):
+            query_terms = f"{query_terms} acoustic audio"
+
+        async with httpx.AsyncClient(follow_redirects=True, timeout=12.0) as client:
+            resp = await client.post(
+                "https://api.figshare.com/v2/articles/search",
+                json={"search_for": query_terms, "page_size": min(10, max(5, limit * 2))},
+                headers={"User-Agent": _BROWSER_UA},
+            )
+            resp.raise_for_status()
+            hits = resp.json() or []
+
+            candidates: list[DiscoveredSourceCandidate] = []
+            for hit in hits[: min(8, len(hits))]:
+                art_id = str(hit.get("id") or "")
+                if not art_id:
+                    continue
+                try:
+                    detail_resp = await client.get(
+                        f"https://api.figshare.com/v2/articles/{art_id}",
+                        headers={"User-Agent": _BROWSER_UA},
+                    )
+                    if detail_resp.status_code != 200:
+                        continue
+                    detail = detail_resp.json()
+                except Exception:
+                    continue
+
+                files = detail.get("files") or []
+                audio_files = [
+                    f
+                    for f in files
+                    if Path(str(f.get("name") or "")).suffix.lower()
+                    in {".wav", ".wave", ".flac", ".ogg", ".mp3", ".m4a", ".aif", ".aiff"}
+                ]
+                zip_files = [
+                    f for f in files if Path(str(f.get("name") or "")).suffix.lower() == ".zip"
+                ]
+                if not audio_files and not zip_files:
+                    continue
+
+                title = re.sub(r"<[^>]+>", "", str(detail.get("title") or hit.get("title") or f"Figshare {art_id}")).strip()
+                raw_desc = re.sub(r"<[^>]+>", " ", str(detail.get("description") or ""))
+                desc = re.sub(r"\s+", " ", raw_desc).strip()[:240]
+                lic = (detail.get("license") or {}).get("name")
+                homepage = str(detail.get("url_public_html") or hit.get("url_public_html") or f"https://figshare.com/articles/_/{art_id}")
+
+                pre_ver = SourceVerificationResult(
+                    status="untested",
+                    streamable=True,
+                    audio_file_count=len(audio_files),
+                    formats=sorted({Path(str(f.get("name") or "")).suffix.lower().lstrip(".") for f in (audio_files or zip_files)}),
+                    sample_file_name=str((audio_files or zip_files)[0].get("name") or ""),
+                    message=(
+                        f"{len(audio_files)} audio file(s)"
+                        if audio_files
+                        else f"{len(zip_files)} remote-browsable ZIP archive(s)"
+                    ),
+                )
+
+                candidates.append(
+                    DiscoveredSourceCandidate(
+                        candidate_id=f"figshare:{art_id}",
+                        provider_id=self.provider_id,
+                        provider_label=self.display_name,
+                        title=title,
+                        description=desc or "Open-access dataset on Figshare.",
+                        homepage_url=homepage,
+                        license=str(lic) if lic else None,
+                        tags=[*(detail.get("tags") or [])[:4], "figshare"],
+                        auth_required=False,
+                        auth_kind="none",
+                        connect_request=CreateSourceRequest(
+                            kind="figshare",
+                            source_id=slugify_source_id(title[:28], "figshare"),
+                            display_name=title[:48],
+                            folder_or_url=art_id,
+                            anonymous=True,
+                            read_only=True,
+                        ),
+                        verification=pre_ver,
+                    )
+                )
+                if len(candidates) >= limit:
+                    break
+
+        return candidates
+
+
 class DiscoveryRegistry:
     """Registry of pluggable archive discovery providers."""
 
@@ -1102,6 +1442,7 @@ def build_default_discovery_registry() -> DiscoveryRegistry:
     reg = DiscoveryRegistry()
     reg.register(CuratedCloudCatalogProvider())
     reg.register(ZenodoDiscoveryProvider())
+    reg.register(FigshareDiscoveryProvider())
     reg.register(HuggingFaceDiscoveryProvider())
     reg.register(INaturalistDiscoveryProvider())
     reg.register(XenoCantoDiscoveryProvider())
